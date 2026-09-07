@@ -1,0 +1,6 @@
+{
+  "name": "PizzaCraft - Full-Stack Pizza Delivery & Inventory",
+  "description": "Full-stack pizza ordering and inventory platform with custom pizza builder, real-time live order tracking, Razorpay test checkout, automated inventory stock management, and admin controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
