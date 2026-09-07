@@ -6,7 +6,10 @@ const router = Router();
 // GET /api/pizzas - List signature artisanal pizzas
 router.get('/', (req: Request, res: Response): void => {
   const db = DataStore.getData();
-  res.json({ pizzas: db.pizzas });
+  res.json({
+    pizzas: db.pizzas,
+    presetPizzas: db.pizzas,
+  });
 });
 
 // GET /api/pizzas/builder-options - Ingredients separated by category for custom pizza builder
@@ -15,19 +18,20 @@ router.get('/builder-options', (req: Request, res: Response): void => {
   const bases = db.inventory.filter((i) => i.category === 'base');
   const sauces = db.inventory.filter((i) => i.category === 'sauce');
   const cheeses = db.inventory.filter((i) => i.category === 'cheese');
-  const veggies = db.inventory.filter((i) => i.category === 'veggie');
+  const vegetables = db.inventory.filter((i) => i.category === 'vegetable' || i.category === 'veggie');
 
   res.json({
     bases,
     sauces,
     cheeses,
-    veggies,
+    vegetables,
+    veggies: vegetables,
     pricingRules: {
       basePizzaPrice: 299,
       sizeMultipliers: {
-        'Regular (10")': 1.0,
-        'Medium (12")': 1.35,
-        'Large (14")': 1.7,
+        'Regular (8")': 0.85,
+        'Medium (10")': 1.0,
+        'Large (12")': 1.35,
       },
     },
   });
@@ -53,7 +57,7 @@ router.post('/calculate-price', (req: Request, res: Response): void => {
 
     const subtotal = baseCrustCost + sauceCost + cheeseCost + veggiesCost;
     const multiplier =
-      size === 'Large (14")' ? 1.7 : size === 'Medium (12")' ? 1.35 : 1.0;
+      size === 'Large (12")' ? 1.35 : size === 'Regular (8")' ? 0.85 : 1.0;
 
     const finalPrice = Math.round(subtotal * multiplier);
 

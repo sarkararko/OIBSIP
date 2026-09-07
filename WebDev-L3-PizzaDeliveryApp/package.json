@@ -1,9 +1,10 @@
 {
-  "name": "oibsip",
+  "name": "pizzacraft",
   "version": "1.0.0",
   "private": true,
-  "description": "Oasis Infobyte Internship Program (OIBSIP) - Level 3 Pizza Delivery Full-Stack Application (PizzaCraft)",
+  "description": "PizzaCraft - Artisanal Woodfire Pizza Delivery & Kitchen Inventory Platform (Oasis Infobyte Web Development & Designing - Level 3 Task)",
   "author": "Arkoparno De Sarkar",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -14,7 +15,6 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/bcryptjs": "^3.0.0",
     "@types/canvas-confetti": "^1.9.0",

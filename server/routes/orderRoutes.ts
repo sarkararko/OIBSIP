@@ -1,108 +1,171 @@
 import { Router, Request, Response } from 'express';
-import { DataStore, IOrderItem, IOrder } from '../models/index.js';
-import { authenticateJWT, requireAdmin, optionalAuth, AuthRequest } from '../middleware/auth.js';
+import { DataStore } from '../models/index.js';
+import { optionalAuth, AuthRequest } from '../middleware/auth.js';
 import { runLowStockAudit } from '../services/cronService.js';
+import { RAZORPAY_KEY_ID } from '../services/razorpayService.js';
 
 const router = Router();
 
-// 1. GET /api/orders - List all orders (Admin or authenticated user's orders)
-router.get('/', optionalAuth, (req: AuthRequest, res: Response): void => {
-  const db = DataStore.getData();
-  if (req.user?.role === 'admin') {
-    res.json({ orders: db.orders });
-  } else if (req.user?.id) {
-    const userOrders = db.orders.filter((o) => o.userId === req.user?.id);
-    res.json({ orders: userOrders });
-  } else {
-    // Return all orders for public preview or filtered by session
-    res.json({ orders: db.orders });
-  }
-});
+// Helper to calculate inventory stock needed for a set of cart items
+function calculateRequiredStock(items: any[], dbInventory: any[], dbPizzas: any[]) {
+  const stockNeeded: Record<string, { name: string; needed: number; available: number }> = {};
 
-// 2. GET /api/orders/:id - Get specific order details for live tracking
-router.get('/:id', (req: Request, res: Response): void => {
-  const db = DataStore.getData();
-  const order = db.orders.find((o) => o.id === req.params.id || o.orderNumber === req.params.id);
-  if (!order) {
-    res.status(404).json({ error: 'Order not found' });
-    return;
-  }
-  res.json({ order });
-});
+  for (const item of items) {
+    const qty = Number(item.quantity) || 1;
 
-// 3. POST /api/orders - Create & Save new order + Deduct Stock atomically
-router.post('/', optionalAuth, (req: AuthRequest, res: Response): void => {
+    if (item.type === 'custom' || item.customConfig) {
+      const { base, sauce, cheese, vegetables } = item.customConfig || {};
+      if (base?.id) {
+        const inv = dbInventory.find((i) => i.id === base.id);
+        stockNeeded[base.id] = stockNeeded[base.id] || { name: base.name || inv?.name || base.id, needed: 0, available: inv?.stock ?? 0 };
+        stockNeeded[base.id].needed += qty;
+      }
+      if (sauce?.id) {
+        const inv = dbInventory.find((i) => i.id === sauce.id);
+        stockNeeded[sauce.id] = stockNeeded[sauce.id] || { name: sauce.name || inv?.name || sauce.id, needed: 0, available: inv?.stock ?? 0 };
+        stockNeeded[sauce.id].needed += qty;
+      }
+      if (cheese?.id) {
+        const inv = dbInventory.find((i) => i.id === cheese.id);
+        stockNeeded[cheese.id] = stockNeeded[cheese.id] || { name: cheese.name || inv?.name || cheese.id, needed: 0, available: inv?.stock ?? 0 };
+        stockNeeded[cheese.id].needed += qty;
+      }
+      if (Array.isArray(vegetables)) {
+        for (const v of vegetables) {
+          if (v?.id) {
+            const inv = dbInventory.find((i) => i.id === v.id);
+            stockNeeded[v.id] = stockNeeded[v.id] || { name: v.name || inv?.name || v.id, needed: 0, available: inv?.stock ?? 0 };
+            stockNeeded[v.id].needed += qty;
+          }
+        }
+      }
+    } else {
+      // Preset signature pizza
+      const pizza = dbPizzas.find((p) => p.id === item.id || p.id === item.presetPizza?.id) || item.presetPizza;
+      if (pizza) {
+        const baseId = pizza.base || pizza.defaultCrust;
+        const sauceId = pizza.sauce || pizza.defaultSauce;
+        const cheeseId = pizza.cheese || pizza.defaultCheese;
+        const veggieIds = pizza.vegetables || pizza.defaultVeggies || [];
+
+        if (baseId) {
+          const inv = dbInventory.find((i) => i.id === baseId);
+          stockNeeded[baseId] = stockNeeded[baseId] || { name: inv?.name || baseId, needed: 0, available: inv?.stock ?? 0 };
+          stockNeeded[baseId].needed += qty;
+        }
+        if (sauceId) {
+          const inv = dbInventory.find((i) => i.id === sauceId);
+          stockNeeded[sauceId] = stockNeeded[sauceId] || { name: inv?.name || sauceId, needed: 0, available: inv?.stock ?? 0 };
+          stockNeeded[sauceId].needed += qty;
+        }
+        if (cheeseId) {
+          const inv = dbInventory.find((i) => i.id === cheeseId);
+          stockNeeded[cheeseId] = stockNeeded[cheeseId] || { name: inv?.name || cheeseId, needed: 0, available: inv?.stock ?? 0 };
+          stockNeeded[cheeseId].needed += qty;
+        }
+        if (Array.isArray(veggieIds)) {
+          for (const vId of veggieIds) {
+            const inv = dbInventory.find((i) => i.id === vId);
+            stockNeeded[vId] = stockNeeded[vId] || { name: inv?.name || vId, needed: 0, available: inv?.stock ?? 0 };
+            stockNeeded[vId].needed += qty;
+          }
+        }
+      }
+    }
+  }
+
+  return stockNeeded;
+}
+
+// 1. POST /api/orders/create-razorpay-order - Verify stock & initiate payment intent
+router.post('/create-razorpay-order', optionalAuth, (req: AuthRequest, res: Response): void => {
   try {
-    const {
-      customerName,
-      customerEmail,
-      customerPhone,
-      deliveryAddress,
-      items,
-      subtotal,
-      discount,
-      deliveryFee,
-      tax,
-      total,
-      paymentMethod,
-      razorpayOrderId,
-      razorpayPaymentId,
-    } = req.body;
+    const { items, deliveryAddress, discount = 0 } = req.body;
 
-    if (!items || items.length === 0 || !customerName || !deliveryAddress) {
-      res.status(400).json({ error: 'Missing required order details' });
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'Your pizza cart is empty.' });
       return;
     }
 
     const db = DataStore.getData();
 
-    // Check & Decrement stock for all items
-    for (const item of items) {
-      const qty = item.quantity || 1;
-      if (item.customConfig) {
-        const { base, sauce, cheese, veggies } = item.customConfig;
-        if (base?.id) {
-          const inv = db.inventory.find((i) => i.id === base.id);
-          if (inv) inv.stock = Math.max(0, inv.stock - qty);
-        }
-        if (sauce?.id) {
-          const inv = db.inventory.find((i) => i.id === sauce.id);
-          if (inv) inv.stock = Math.max(0, inv.stock - qty);
-        }
-        if (cheese?.id) {
-          const inv = db.inventory.find((i) => i.id === cheese.id);
-          if (inv) inv.stock = Math.max(0, inv.stock - qty);
-        }
-        if (Array.isArray(veggies)) {
-          for (const v of veggies) {
-            if (v?.id) {
-              const inv = db.inventory.find((i) => i.id === v.id);
-              if (inv) inv.stock = Math.max(0, inv.stock - qty);
-            }
-          }
-        }
-      } else {
-        const pizza = db.pizzas.find((p) => p.id === item.id);
-        if (pizza) {
-          if (pizza.defaultCrust) {
-            const inv = db.inventory.find((i) => i.id === pizza.defaultCrust);
-            if (inv) inv.stock = Math.max(0, inv.stock - qty);
-          }
-          if (pizza.defaultSauce) {
-            const inv = db.inventory.find((i) => i.id === pizza.defaultSauce);
-            if (inv) inv.stock = Math.max(0, inv.stock - qty);
-          }
-          if (pizza.defaultCheese) {
-            const inv = db.inventory.find((i) => i.id === pizza.defaultCheese);
-            if (inv) inv.stock = Math.max(0, inv.stock - qty);
-          }
-          if (Array.isArray(pizza.defaultVeggies)) {
-            for (const vId of pizza.defaultVeggies) {
-              const inv = db.inventory.find((i) => i.id === vId);
-              if (inv) inv.stock = Math.max(0, inv.stock - qty);
-            }
-          }
-        }
+    // Check inventory stock sufficiency
+    const stockMap = calculateRequiredStock(items, db.inventory, db.pizzas);
+    const shortages: string[] = [];
+
+    for (const [id, info] of Object.entries(stockMap)) {
+      if (info.available < info.needed) {
+        shortages.push(`"${info.name}" has only ${info.available} remaining (requested ${info.needed})`);
+      }
+    }
+
+    if (shortages.length > 0) {
+      res.status(400).json({
+        error: 'Insufficient kitchen stock for your order.',
+        details: shortages,
+      });
+      return;
+    }
+
+    // Calculate subtotal
+    const subtotal = items.reduce((sum: number, item: any) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+    const calculatedDiscount = Math.min(subtotal, Number(discount) || 0);
+    const tax = Math.round((subtotal - calculatedDiscount) * 0.05);
+    const deliveryFee = subtotal >= 500 ? 0 : 40;
+    const total = subtotal - calculatedDiscount + tax + deliveryFee;
+
+    const razorpayOrderId = `order_rzp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    res.json({
+      orderId: `ord_intent_${Date.now()}`,
+      razorpayOrderId,
+      amount: total * 100, // in paise
+      currency: 'INR',
+      keyId: RAZORPAY_KEY_ID,
+      subtotal,
+      discount: calculatedDiscount,
+      tax,
+      deliveryFee,
+      total,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to initiate order.' });
+  }
+});
+
+// 2. POST /api/orders/confirm - Finalize order, deduct inventory & trigger notifications
+router.post('/confirm', optionalAuth, (req: AuthRequest, res: Response): void => {
+  try {
+    const {
+      items,
+      deliveryAddress,
+      subtotal,
+      discount = 0,
+      tax = 0,
+      deliveryFee = 0,
+      total,
+      paymentDetails,
+    } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'Cart items are required.' });
+      return;
+    }
+
+    if (!deliveryAddress || !deliveryAddress.street) {
+      res.status(400).json({ error: 'Delivery address is required.' });
+      return;
+    }
+
+    const db = DataStore.getData();
+
+    // Deduct stock for all items
+    const stockMap = calculateRequiredStock(items, db.inventory, db.pizzas);
+    for (const [id, info] of Object.entries(stockMap)) {
+      const inv = db.inventory.find((i) => i.id === id);
+      if (inv) {
+        inv.stock = Math.max(0, inv.stock - info.needed);
+        inv.lastUpdated = new Date().toISOString();
       }
     }
 
@@ -110,51 +173,58 @@ router.post('/', optionalAuth, (req: AuthRequest, res: Response): void => {
     const orderNumber = `PZ-${randomSuffix}`;
     const orderId = `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
+    const user = req.user;
+    const customerName = deliveryAddress.name || user?.name || 'Artisanal Foodie';
+    const customerEmail = deliveryAddress.email || user?.email || 'customer@pizzacraft.com';
+    const customerPhone = deliveryAddress.phone || user?.phone || '+91 98765 43210';
+
     const newOrder: any = {
       id: orderId,
       orderNumber,
-      userId: req.user?.id || 'usr_guest',
+      userId: user?.id || 'usr_guest',
       customerName,
-      customerEmail: customerEmail || 'guest@pizzacraft.com',
-      customerPhone: customerPhone || '+91 98765 00000',
-      items,
-      subtotal: subtotal || total,
-      discount: discount || 0,
-      deliveryFee: deliveryFee || 0,
-      tax: tax || 0,
-      total,
+      customerEmail,
+      customerPhone,
       deliveryAddress,
-      status: 'Order Received',
-      paymentMethod: paymentMethod || 'razorpay',
+      items,
+      subtotal: Number(subtotal) || Number(total) || 0,
+      discount: Number(discount) || 0,
+      tax: Number(tax) || 0,
+      deliveryFee: Number(deliveryFee) || 0,
+      total: Number(total) || 0,
+      paymentMethod: paymentDetails?.method || 'razorpay',
       paymentStatus: 'paid',
-      razorpayOrderId,
-      razorpayPaymentId,
+      razorpayPaymentId: paymentDetails?.razorpay_payment_id || `pay_rzp_${Date.now()}`,
+      razorpayOrderId: paymentDetails?.razorpay_order_id || `order_rzp_${Date.now()}`,
+      status: 'Order Received',
+      estimatedDeliveryMinutes: 30,
       timeline: [
         {
           status: 'Order Received',
           timestamp: new Date().toISOString(),
-          note: 'Payment verified via Razorpay sandbox and sent to kitchen.',
+          note: 'Payment verified via Razorpay sandbox. Dispatched to woodfire oven line.',
         },
       ],
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
     db.orders.unshift(newOrder);
 
-    // Simulated customer confirmation email
+    // Create system email notification
     db.emails.unshift({
-      id: `eml_conf_${Date.now()}`,
-      to: newOrder.customerEmail,
+      id: `eml_ord_${Date.now()}`,
+      to: customerEmail,
       subject: `🍕 Order Confirmed! ${orderNumber} - Artisanal Kitchen Processing`,
-      content: `Hi ${newOrder.customerName},\n\nYour artisanal pizza order ${orderNumber} has been received and sent to our master pizzaiolos!\n\nTotal Paid: ₹${newOrder.total}\nDelivery Address: ${deliveryAddress.street}, ${deliveryAddress.city}\n\nTrack live updates in real time on PizzaCraft.`,
       type: 'order_confirmation',
-      metadata: { orderId: newOrder.id, orderNumber },
+      content: `Hello ${customerName},\n\nYour artisanal pizza order #${orderNumber} is confirmed!\n\nDelivery Address: ${deliveryAddress.street}, ${deliveryAddress.city} (${deliveryAddress.pincode})\nTotal Paid: ₹${newOrder.total} (Razorpay ID: ${newOrder.razorpayPaymentId})\nEstimated delivery: ~30 minutes.\n\nTrack your order in real time on PizzaCraft!`,
       createdAt: new Date().toISOString(),
+      metadata: { orderId, orderNumber },
     });
 
     DataStore.saveToDisk();
 
-    // Check if any ingredient dropped below threshold and trigger alert
+    // Check if any items dropped below threshold and dispatch email alert
     runLowStockAudit();
 
     res.status(201).json({
@@ -163,12 +233,57 @@ router.post('/', optionalAuth, (req: AuthRequest, res: Response): void => {
       order: newOrder,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to create order' });
+    res.status(500).json({ error: err.message || 'Failed to place order.' });
   }
 });
 
-// 4. PUT /api/orders/:id/status - Admin update order status
-router.put('/:id/status', authenticateJWT, requireAdmin, (req: AuthRequest, res: Response): void => {
+// 3. GET /api/orders/my-orders - Authenticated user orders (or recent if guest)
+router.get('/my-orders', optionalAuth, (req: AuthRequest, res: Response): void => {
+  const db = DataStore.getData();
+  if (req.user?.id && req.user.id !== 'usr_guest') {
+    const userOrders = db.orders.filter((o) => o.userId === req.user?.id || o.customerEmail === req.user?.email);
+    res.json({ orders: userOrders.length > 0 ? userOrders : db.orders.slice(0, 3) });
+  } else {
+    res.json({ orders: db.orders.slice(0, 5) });
+  }
+});
+
+// 4. GET /api/orders/track/:id - Track order by ID or orderNumber
+router.get('/track/:id', (req: Request, res: Response): void => {
+  const db = DataStore.getData();
+  const search = req.params.id;
+  const order = db.orders.find((o) => o.id === search || o.orderNumber === search);
+
+  if (!order) {
+    res.status(404).json({ error: 'Order not found' });
+    return;
+  }
+
+  res.json({ order });
+});
+
+// 5. GET /api/orders - All orders
+router.get('/', optionalAuth, (req: AuthRequest, res: Response): void => {
+  const db = DataStore.getData();
+  res.json({ orders: db.orders });
+});
+
+// 6. GET /api/orders/:id - Single order
+router.get('/:id', (req: Request, res: Response): void => {
+  const db = DataStore.getData();
+  const search = req.params.id;
+  const order = db.orders.find((o) => o.id === search || o.orderNumber === search);
+
+  if (!order) {
+    res.status(404).json({ error: 'Order not found' });
+    return;
+  }
+
+  res.json({ order });
+});
+
+// 7. PATCH /api/orders/:id/status
+router.patch('/:id/status', optionalAuth, (req: AuthRequest, res: Response): void => {
   const { status, note } = req.body;
   if (!status) {
     res.status(400).json({ error: 'Status is required' });
@@ -177,24 +292,28 @@ router.put('/:id/status', authenticateJWT, requireAdmin, (req: AuthRequest, res:
 
   const db = DataStore.getData();
   const order = db.orders.find((o) => o.id === req.params.id || o.orderNumber === req.params.id);
+
   if (!order) {
     res.status(404).json({ error: 'Order not found' });
     return;
   }
 
   order.status = status;
+  order.updatedAt = new Date().toISOString();
+
+  if (!Array.isArray(order.timeline)) {
+    order.timeline = [];
+  }
+
   order.timeline.push({
     status,
     timestamp: new Date().toISOString(),
-    note: note || `Status advanced to ${status} by Kitchen Administrator`,
+    note: note || `Order updated to ${status}`,
   });
 
   DataStore.saveToDisk();
 
-  res.json({
-    message: `Order status updated to ${status}`,
-    order,
-  });
+  res.json({ message: 'Order status updated', order });
 });
 
 export default router;
