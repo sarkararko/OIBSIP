@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type IngredientCategory = 'base' | 'sauce' | 'cheese' | 'veggie';
+export type IngredientCategory = 'base' | 'sauce' | 'cheese' | 'veggie' | 'vegetable';
 
 export interface IIngredient extends Document {
   id: string;
@@ -22,7 +22,7 @@ export const IngredientSchema = new Schema<IIngredient>(
   {
     id: { type: String, required: true, unique: true },
     name: { type: String, required: true },
-    category: { type: String, required: true, enum: ['base', 'sauce', 'cheese', 'veggie'] },
+    category: { type: String, required: true, enum: ['base', 'sauce', 'cheese', 'veggie', 'vegetable'] },
     stock: { type: Number, required: true, default: 50 },
     threshold: { type: Number, required: true, default: 20 },
     unit: { type: String, default: 'units' },

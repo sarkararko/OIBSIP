@@ -1,12 +1,9 @@
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { createExpressApp } from './server/app.js';
 import { connectDB } from './server/config/db.js';
 import { initCronService } from './server/services/cronService.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const PORT = 3000;
 
 async function startServer() {
@@ -22,13 +19,12 @@ async function startServer() {
   // 4. Vite middleware for frontend development & production static serving
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      root: __dirname,
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(__dirname, 'dist');
+    const distPath = path.join(process.cwd(), 'dist');
     app.use((await import('express')).default.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));

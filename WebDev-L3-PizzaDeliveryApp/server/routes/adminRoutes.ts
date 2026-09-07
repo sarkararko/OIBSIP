@@ -1,135 +1,207 @@
-import { Router, Request, Response } from 'express';
-import { DataStore } from '../models/index.js';
-import { authenticateJWT, requireAdmin, optionalAuth, AuthRequest } from '../middleware/auth.js';
+import { Router, Response } from 'express';
+import { dbService } from '../services/dbService.js';
+import { authenticateJWT, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { runLowStockAudit } from '../services/cronService.js';
+import { UserModel } from '../models/User.js';
+import { isMongoConnected } from '../config/db.js';
+import { DataStore } from '../models/index.js';
 
 const router = Router();
 
-// GET /api/admin/inventory - All SKUs with summary metrics
-router.get('/inventory', optionalAuth, (req: AuthRequest, res: Response): void => {
-  const db = DataStore.getData();
-  const lowStockCount = db.inventory.filter((i) => i.stock < i.threshold).length;
-  const healthyCount = db.inventory.filter((i) => i.stock >= i.threshold).length;
+// Apply strict JWT and Admin Role authorization to all admin endpoints
+router.use(authenticateJWT, requireAdmin);
 
-  res.json({
-    inventory: db.inventory,
-    summary: {
-      totalSkus: db.inventory.length,
-      lowStockCount,
-      healthyCount,
-    },
-  });
+// GET /api/admin/dashboard - High-level operational metrics
+router.get('/dashboard', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const inventory = await dbService.getInventory();
+    const orders = await dbService.getOrders();
+    const lowStockThreshold = Number(process.env.LOW_STOCK_THRESHOLD) || 20;
+
+    const lowStockCount = inventory.filter(
+      (i) => i.stock < (i.threshold || lowStockThreshold)
+    ).length;
+    const totalOrders = orders.length;
+    const totalRevenue = orders.reduce((sum, o) => (o.status !== 'Cancelled' ? sum + o.total : sum), 0);
+    const activeOrders = orders.filter(
+      (o) => o.status === 'Order Received' || o.status === 'In Kitchen' || o.status === 'Sent to Delivery'
+    ).length;
+
+    let totalCustomers = 0;
+    if (isMongoConnected()) {
+      totalCustomers = await UserModel.countDocuments({ role: { $ne: 'admin' } });
+    } else {
+      totalCustomers = DataStore.getData().users.filter((u) => u.role !== 'admin').length;
+    }
+
+    res.json({
+      metrics: {
+        totalOrders,
+        totalRevenue,
+        activeOrders,
+        lowStockCount,
+        totalCustomers,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch dashboard metrics' });
+  }
+});
+
+// GET /api/admin/inventory - All SKUs with summary metrics
+router.get('/inventory', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const inventory = await dbService.getInventory();
+    const lowStockThreshold = Number(process.env.LOW_STOCK_THRESHOLD) || 20;
+
+    const lowStockCount = inventory.filter(
+      (i) => i.stock < (i.threshold || lowStockThreshold)
+    ).length;
+    const healthyCount = inventory.filter(
+      (i) => i.stock >= (i.threshold || lowStockThreshold)
+    ).length;
+
+    res.json({
+      inventory,
+      summary: {
+        totalSkus: inventory.length,
+        lowStockCount,
+        healthyCount,
+        threshold: lowStockThreshold,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch inventory' });
+  }
 });
 
 // POST /api/admin/inventory/:itemId/adjust - Increment or decrement stock
-router.post('/inventory/:itemId/adjust', optionalAuth, (req: AuthRequest, res: Response): void => {
-  const { itemId } = req.params;
-  const { delta } = req.body;
+router.post('/inventory/:itemId/adjust', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { itemId } = req.params;
+    const { delta } = req.body;
 
-  const db = DataStore.getData();
-  const item = db.inventory.find((i) => i.id === itemId);
+    const item = await dbService.getInventoryItem(itemId);
+    if (!item) {
+      res.status(404).json({ error: 'Inventory item not found' });
+      return;
+    }
 
-  if (!item) {
-    res.status(404).json({ error: 'Inventory item not found' });
-    return;
+    const adjustment = typeof delta === 'number' ? delta : 0;
+    const updated = await dbService.adjustInventoryStock(itemId, adjustment);
+
+    // Run audit for alert checks
+    runLowStockAudit();
+
+    res.json({
+      message: `Stock for ${item.name} adjusted by ${adjustment > 0 ? '+' : ''}${adjustment}. Current: ${updated?.stock ?? item.stock}`,
+      item: updated || item,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to adjust stock' });
   }
-
-  const adjustment = typeof delta === 'number' ? delta : 0;
-  item.stock = Math.max(0, item.stock + adjustment);
-  item.lastUpdated = new Date().toISOString();
-
-  DataStore.saveToDisk();
-
-  // Check if stock alerts need to trigger
-  runLowStockAudit();
-
-  res.json({
-    message: `Stock for ${item.name} adjusted by ${adjustment > 0 ? '+' : ''}${adjustment}. Current: ${item.stock}`,
-    item,
-  });
 });
 
-// PUT /api/admin/inventory/:itemId - Edit item properties (name, stock, threshold, price, etc.)
-router.put('/inventory/:itemId', optionalAuth, (req: AuthRequest, res: Response): void => {
-  const { itemId } = req.params;
-  const { name, stock, threshold, price, unit, description, badge } = req.body;
+// PUT /api/admin/inventory/:itemId - Edit item properties
+router.put('/inventory/:itemId', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { itemId } = req.params;
+    const { name, stock, threshold, price, unit, description, badge } = req.body;
 
-  const db = DataStore.getData();
-  const item = db.inventory.find((i) => i.id === itemId);
+    const item = await dbService.getInventoryItem(itemId);
+    if (!item) {
+      res.status(404).json({ error: 'Inventory item not found' });
+      return;
+    }
 
-  if (!item) {
-    res.status(404).json({ error: 'Inventory item not found' });
-    return;
+    const updates: any = {};
+    if (typeof name === 'string') updates.name = name;
+    if (typeof stock === 'number') updates.stock = Math.max(0, stock);
+    if (typeof threshold === 'number') updates.threshold = Math.max(0, threshold);
+    if (typeof price === 'number') updates.price = Math.max(0, price);
+    if (typeof unit === 'string') updates.unit = unit;
+    if (typeof description === 'string') updates.description = description;
+    if (typeof badge === 'string') updates.badge = badge;
+    updates.lastUpdated = new Date().toISOString();
+
+    const updated = await dbService.updateInventoryItem(itemId, updates);
+    runLowStockAudit();
+
+    res.json({
+      message: `Inventory item ${item.name} updated successfully.`,
+      item: updated || item,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update inventory item' });
   }
-
-  if (typeof name === 'string') item.name = name;
-  if (typeof stock === 'number') item.stock = Math.max(0, stock);
-  if (typeof threshold === 'number') item.threshold = Math.max(0, threshold);
-  if (typeof price === 'number') item.price = Math.max(0, price);
-  if (typeof unit === 'string') item.unit = unit;
-  if (typeof description === 'string') item.description = description;
-  if (typeof badge === 'string') item.badge = badge;
-  item.lastUpdated = new Date().toISOString();
-
-  DataStore.saveToDisk();
-  runLowStockAudit();
-
-  res.json({
-    message: `Inventory item ${item.name} updated successfully.`,
-    item,
-  });
 });
 
 // GET /api/admin/orders - All customer orders
-router.get('/orders', optionalAuth, (req: AuthRequest, res: Response): void => {
-  const db = DataStore.getData();
-  res.json({ orders: db.orders });
+router.get('/orders', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const orders = await dbService.getOrders();
+    res.json({ orders });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch orders' });
+  }
 });
 
 // PATCH & PUT /api/admin/orders/:orderId/status - Update kitchen progress
-const updateOrderStatus = (req: AuthRequest, res: Response): void => {
-  const { orderId } = req.params;
-  const { status, note } = req.body;
+const updateOrderStatusHandler = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { orderId } = req.params;
+    const { status, note } = req.body;
 
-  if (!status) {
-    res.status(400).json({ error: 'Status is required' });
-    return;
+    if (!status) {
+      res.status(400).json({ error: 'Status is required' });
+      return;
+    }
+
+    const order = await dbService.getOrderById(orderId);
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+
+    const defaultNote =
+      status === 'Cancelled'
+        ? 'Order cancelled by Admin. Inventory has been restored.'
+        : `Order advanced to "${status}" by Executive Kitchen Staff`;
+
+    const updated = await dbService.updateOrderStatus(orderId, status, note || defaultNote);
+
+    res.json({
+      message: `Order #${order.orderNumber} status changed to ${status}`,
+      order: updated || order,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update order status' });
   }
-
-  const db = DataStore.getData();
-  const order = db.orders.find((o) => o.id === orderId || o.orderNumber === orderId);
-
-  if (!order) {
-    res.status(404).json({ error: 'Order not found' });
-    return;
-  }
-
-  order.status = status;
-  order.updatedAt = new Date().toISOString();
-
-  if (!Array.isArray(order.timeline)) {
-    order.timeline = [];
-  }
-
-  order.timeline.push({
-    status,
-    timestamp: new Date().toISOString(),
-    note: note || `Order advanced to "${status}" by Executive Kitchen Staff`,
-  });
-
-  DataStore.saveToDisk();
-
-  res.json({
-    message: `Order #${order.orderNumber} status changed to ${status}`,
-    order,
-  });
 };
 
-router.patch('/orders/:orderId/status', optionalAuth, updateOrderStatus);
-router.put('/orders/:orderId/status', optionalAuth, updateOrderStatus);
+router.patch('/orders/:orderId/status', updateOrderStatusHandler);
+router.put('/orders/:orderId/status', updateOrderStatusHandler);
+
+// GET /api/admin/users - User management (sanitized)
+router.get('/users', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    let users: any[] = [];
+    if (isMongoConnected()) {
+      users = await UserModel.find().select('-passwordHash').lean();
+    } else {
+      users = DataStore.getData().users.map((u) => {
+        const { passwordHash, ...safe } = u;
+        return safe;
+      });
+    }
+    res.json({ users });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch users' });
+  }
+});
 
 // POST /api/admin/inventory/alerts/trigger-check - Manual execution of Node-Cron audit
-router.post('/inventory/alerts/trigger-check', optionalAuth, (req: AuthRequest, res: Response): void => {
+router.post('/inventory/alerts/trigger-check', (req: AuthRequest, res: Response): void => {
   const auditResult = runLowStockAudit();
   res.json({
     message: 'Manual Node-Cron stock monitor executed successfully',
@@ -139,9 +211,13 @@ router.post('/inventory/alerts/trigger-check', optionalAuth, (req: AuthRequest, 
 });
 
 // POST /api/admin/reset-demo-data - Restore factory demo state
-router.post('/reset-demo-data', optionalAuth, (req: AuthRequest, res: Response): void => {
-  DataStore.initDefaultData();
-  res.json({ message: 'Demo inventory & sample orders restored.' });
+router.post('/reset-demo-data', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    DataStore.initDefaultData();
+    res.json({ message: 'Demo inventory & sample orders restored.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to reset demo data' });
+  }
 });
 
 export default router;
