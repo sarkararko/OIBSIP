@@ -15,16 +15,24 @@ export function createExpressApp(): Express {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // API Healthcheck & system status
-  app.get('/api/health', (req, res) => {
-    const dbDiagnostics = getDatabaseDiagnostics();
-    res.json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      service: 'PizzaCraft Artisanal Backend Engine',
-      environment: process.env.NODE_ENV || 'development',
-      database: dbDiagnostics,
-    });
+  // API Healthcheck
+  app.get('/api/health', (_req, res) => {
+    const connected = isMongoConnected();
+    if (connected) {
+      res.status(200).json({
+        status: 'ok',
+        database: 'connected',
+        service: 'PizzaCraft Artisanal Backend Engine',
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      res.status(503).json({
+        status: 'error',
+        database: 'disconnected',
+        service: 'PizzaCraft Artisanal Backend Engine',
+        timestamp: new Date().toISOString(),
+      });
+    }
   });
 
   app.get('/api/database/status', (req, res) => {

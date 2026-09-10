@@ -201,8 +201,8 @@ router.get('/users', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // POST /api/admin/inventory/alerts/trigger-check - Manual execution of Node-Cron audit
-router.post('/inventory/alerts/trigger-check', (req: AuthRequest, res: Response): void => {
-  const auditResult = runLowStockAudit();
+router.post('/inventory/alerts/trigger-check', async (req: AuthRequest, res: Response): Promise<void> => {
+  const auditResult = await runLowStockAudit();
   res.json({
     message: 'Manual Node-Cron stock monitor executed successfully',
     lowItems: auditResult.lowStockItems,

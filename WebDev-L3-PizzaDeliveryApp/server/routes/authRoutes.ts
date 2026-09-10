@@ -5,6 +5,7 @@ import { DataStore } from '../models/index.js';
 import { UserModel } from '../models/User.js';
 import { AdminModel } from '../models/Admin.js';
 import { VerificationTokenModel } from '../models/VerificationToken.js';
+import { PasswordResetTokenModel } from '../models/PasswordResetToken.js';
 import { isMongoConnected } from '../config/db.js';
 import { JWT_SECRET, authenticateJWT, optionalAuth, AuthRequest } from '../middleware/auth.js';
 import { sendEmailNotification } from '../services/emailService.js';
@@ -155,6 +156,7 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     // Store in MongoDB if connected
     if (isMongoConnected()) {
       await (UserModel as any).create({
+        id: userId,
         name,
         email: emailLower,
         passwordHash,
@@ -392,6 +394,15 @@ router.post('/forgot-password', async (req: Request, res: Response): Promise<voi
     const user = db.users.find((u) => u.email.toLowerCase() === emailLower);
 
     const resetToken = `rst_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
+    if (isMongoConnected()) {
+      await (PasswordResetTokenModel as any).create({
+        email: emailLower,
+        token: resetToken,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        used: false,
+      });
+    }
+
     db.passwordResetTokens.push({
       email: emailLower,
       token: resetToken,
@@ -434,13 +445,24 @@ router.post('/reset-password', async (req: Request, res: Response): Promise<void
     let targetEmail = email;
 
     if (token) {
-      const resetRecord = db.passwordResetTokens.find((r) => r.token === token && !r.used);
-      if (!resetRecord) {
-        res.status(400).json({ error: 'Invalid or expired reset token' });
-        return;
+      if (isMongoConnected()) {
+        const mongoReset = await (PasswordResetTokenModel as any).findOne({ token, used: false });
+        if (mongoReset) {
+          targetEmail = mongoReset.email;
+          mongoReset.used = true;
+          await mongoReset.save();
+        }
       }
-      targetEmail = resetRecord.email;
-      resetRecord.used = true;
+
+      if (!targetEmail) {
+        const resetRecord = db.passwordResetTokens.find((r) => r.token === token && !r.used);
+        if (!resetRecord) {
+          res.status(400).json({ error: 'Invalid or expired reset token' });
+          return;
+        }
+        targetEmail = resetRecord.email;
+        resetRecord.used = true;
+      }
     }
 
     const emailLower = targetEmail.toLowerCase();

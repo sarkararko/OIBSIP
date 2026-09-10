@@ -118,7 +118,7 @@ router.post('/adjust-stock', authenticateJWT, requireAdmin, async (req: AuthRequ
     }
 
     // Run low stock audit to evaluate alerts
-    runLowStockAudit();
+    await runLowStockAudit();
 
     res.json({
       message: `Stock updated for ${item.name}`,
@@ -158,8 +158,8 @@ router.put('/update-item', authenticateJWT, requireAdmin, async (req: AuthReques
 });
 
 // POST /api/inventory/trigger-cron - Trigger manual node-cron check
-router.post('/trigger-cron', (req: Request, res: Response): void => {
-  const result = runLowStockAudit();
+router.post('/trigger-cron', async (req: Request, res: Response): Promise<void> => {
+  const result = await runLowStockAudit();
   res.json({
     message: 'Manual Node-Cron inventory audit completed',
     result,

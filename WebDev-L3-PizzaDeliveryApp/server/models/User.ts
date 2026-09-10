@@ -8,19 +8,21 @@ export interface IUserAddress {
 }
 
 export interface IUser extends Document {
+  id?: string;
   name: string;
   email: string;
   passwordHash: string;
   phone: string;
   isVerified: boolean;
   addresses: IUserAddress[];
-  role: 'customer' | 'admin';
+  role: 'customer' | 'admin' | 'user';
   createdAt: Date;
   updatedAt: Date;
 }
 
 export const UserSchema = new Schema<IUser>(
   {
+    id: { type: String, sparse: true, index: true },
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
@@ -34,7 +36,7 @@ export const UserSchema = new Schema<IUser>(
         notes: { type: String, default: '' },
       },
     ],
-    role: { type: String, enum: ['customer', 'admin'], default: 'customer' },
+    role: { type: String, enum: ['customer', 'admin', 'user'], default: 'customer' },
   },
   {
     timestamps: true,

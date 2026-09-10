@@ -75,6 +75,7 @@ class DatabaseService {
         const salt = await bcrypt.genSalt(10);
         const hash = await bcrypt.hash('admin123', salt);
         await (AdminModel as any).create({
+          id: 'adm_master_01',
           name: 'Executive Chef Mario',
           email: adminEmail,
           passwordHash: hash,
@@ -91,6 +92,7 @@ class DatabaseService {
         const salt = await bcrypt.genSalt(10);
         const hash = await bcrypt.hash('password123', salt);
         await (UserModel as any).create({
+          id: 'usr_demo_01',
           name: 'Marco Rossi',
           email: demoUserEmail,
           passwordHash: hash,
