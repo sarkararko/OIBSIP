@@ -33,7 +33,7 @@ import { createExpressApp } from "./server/app.js";
 import { connectDB, getSafeMongoDetails, startAutoReconnect } from "./server/config/db.js";
 import { initCronService } from "./server/services/cronService.js";
 
-const projectRoot = typeof __dirname !== "undefined" ? __dirname : process.cwd();
+const projectRoot = process.cwd();
 
 const PORT = Number(process.env.PORT) || 3000;
 
