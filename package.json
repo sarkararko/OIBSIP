@@ -6,12 +6,15 @@
   "author": "Arkoparno De Sarkar",
   "type": "module",
   "scripts": {
-    "dev": "npm --prefix WebDev-L3-PizzaDeliveryApp run dev",
-    "build": "npm --prefix WebDev-L3-PizzaDeliveryApp run build",
-    "start": "npm --prefix WebDev-L3-PizzaDeliveryApp run start",
-    "preview": "npm --prefix WebDev-L3-PizzaDeliveryApp run preview",
-    "lint": "npm --prefix WebDev-L3-PizzaDeliveryApp run lint"
-  },
+  "dev": "tsx server.ts",
+  "build": "vite build",
+  "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+  "build:full": "vite build && npm run build:server",
+  "start": "node dist/server.cjs",
+  "preview": "vite preview",
+  "clean": "rm -rf dist server.cjs",
+  "lint": "tsc --noEmit"
+},
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
