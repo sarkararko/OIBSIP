@@ -17,12 +17,8 @@ for (const cand of envCandidates) {
 }
 
 // Configure standard public DNS resolvers for Node.js / c-ares SRV lookups
-try {
-  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
-} catch {
-  // If setServers is restricted or unavailable, continue gracefully
-}
-
+// Use the operating system's DNS resolver.
+// Windows can resolve MongoDB Atlas SRV records correctly.
 export const DATA_FILE = path.join(process.cwd(), 'server-data.json');
 
 let mongoConnected = false;
