@@ -14,6 +14,12 @@ export interface IUser extends Document {
   passwordHash: string;
   phone: string;
   isVerified: boolean;
+  emailVerified: boolean;
+  verificationOtpHash?: string | null;
+  verificationOtpExpiresAt?: Date | null;
+  lastOtpSentAt?: Date | null;
+  passwordResetOtpHash?: string | null;
+  passwordResetOtpExpiresAt?: Date | null;
   addresses: IUserAddress[];
   role: 'customer' | 'admin' | 'user';
   createdAt: Date;
@@ -28,6 +34,12 @@ export const UserSchema = new Schema<IUser>(
     passwordHash: { type: String, required: true },
     phone: { type: String, default: '' },
     isVerified: { type: Boolean, default: false },
+    emailVerified: { type: Boolean, default: false },
+    verificationOtpHash: { type: String, default: null },
+    verificationOtpExpiresAt: { type: Date, default: null },
+    lastOtpSentAt: { type: Date, default: null },
+    passwordResetOtpHash: { type: String, default: null },
+    passwordResetOtpExpiresAt: { type: Date, default: null },
     addresses: [
       {
         street: { type: String, default: '' },

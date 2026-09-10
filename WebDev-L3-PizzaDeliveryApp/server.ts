@@ -28,15 +28,12 @@ try {
   // Continue if custom DNS set is restricted
 }
 
-import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
 import { createExpressApp } from "./server/app.js";
 import { connectDB, getSafeMongoDetails, startAutoReconnect } from "./server/config/db.js";
 import { initCronService } from "./server/services/cronService.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = __dirname;
+const projectRoot = typeof __dirname !== "undefined" ? __dirname : process.cwd();
 
 const PORT = Number(process.env.PORT) || 3000;
 

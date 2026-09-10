@@ -31,12 +31,22 @@ export const OrderSummaryModal: React.FC<OrderSummaryModalProps> = ({
   const { user, isAuthenticated } = useAuth();
 
   const [addressForm, setAddressForm] = useState({
-    street: deliveryAddress.street || 'Flat 402, Sunset Heights, Baker Street',
+    street: deliveryAddress.street || user?.address || 'Flat 402, Sunset Heights, Baker Street',
     city: deliveryAddress.city || 'Mumbai',
     pincode: deliveryAddress.pincode || '400001',
     phone: deliveryAddress.phone || user?.phone || '+91 99887 76655',
     notes: deliveryAddress.notes || 'Please leave at door if call goes unanswered'
   });
+
+  React.useEffect(() => {
+    if (isOpen && user) {
+      setAddressForm(prev => ({
+        ...prev,
+        phone: deliveryAddress.phone || user.phone || prev.phone,
+        street: deliveryAddress.street || user.address || prev.street
+      }));
+    }
+  }, [isOpen, user]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);

@@ -23,7 +23,7 @@ interface NavbarProps {
   onOpenAuth: (mode?: 'login' | 'register') => void;
   onOpenAdminLogin: () => void;
   onOpenCart: () => void;
-  onOpenEmailInbox: () => void;
+  onOpenEmailInbox?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -32,32 +32,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuth,
   onOpenAdminLogin,
   onOpenCart,
-  onOpenEmailInbox
 }) => {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
   const { itemCount } = useCart();
-  const [unreadEmailCount, setUnreadEmailCount] = useState(0);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  // Poll for simulated system email notifications / verification links / low-stock alerts
-  useEffect(() => {
-    const fetchEmails = async () => {
-      try {
-        const res = await fetch('/api/emails');
-        if (res.ok) {
-          const data = await res.json();
-          const unread = data.emails.filter((e: any) => !e.read).length;
-          setUnreadEmailCount(unread);
-        }
-      } catch (err) {
-        // ignore in background
-      }
-    };
-    fetchEmails();
-    const interval = setInterval(fetchEmails, 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-amber-900/20 text-slate-100 shadow-lg">
@@ -147,21 +126,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Right Action Icons & Auth */}
           <div className="flex items-center space-x-2.5 sm:space-x-3">
             
-            {/* System Mailbox simulator trigger */}
-            <button
-              id="btn-system-mailbox"
-              onClick={onOpenEmailInbox}
-              title="System Email Inbox (Verification links, Reset links, Low stock alerts)"
-              className="relative p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-colors border border-slate-700 bg-slate-850 shadow-sm"
-            >
-              <Mail className="w-5 h-5 text-amber-400" />
-              {unreadEmailCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow">
-                  {unreadEmailCount}
-                </span>
-              )}
-            </button>
-
             {/* Cart Trigger */}
             <button
               id="btn-open-cart"
