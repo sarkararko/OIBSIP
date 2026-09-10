@@ -10,9 +10,8 @@ import { RazorpayModal } from './components/RazorpayModal';
 import { OrderTrackingView } from './components/OrderTrackingView';
 import { AdminPortal } from './components/AdminPortal';
 import { AuthModal } from './components/AuthModal';
-import { SystemEmailInboxModal } from './components/SystemEmailInboxModal';
 import { PresetPizza, Order } from './types';
-import { Sparkles, Pizza, ShieldCheck, Heart, Mail } from 'lucide-react';
+import { Sparkles, Pizza, ShieldCheck, Heart } from 'lucide-react';
 
 function MainAppContent() {
   const { user, isAuthenticated, isAdmin } = useAuth();
@@ -28,8 +27,8 @@ function MainAppContent() {
   const [isRazorpayOpen, setIsRazorpayOpen] = useState(false);
   const [razorpayOrderData, setRazorpayOrderData] = useState<any>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot'>('login');
-  const [isEmailInboxOpen, setIsEmailInboxOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'verify'>('login');
+  const [isPendingCheckout, setIsPendingCheckout] = useState(false);
 
   // Handlers
   const handleNavigate = (view: string, data?: any) => {
@@ -46,7 +45,7 @@ function MainAppContent() {
     setCurrentView('builder');
   };
 
-  const handleOpenAuth = (mode: 'login' | 'register' = 'login') => {
+  const handleOpenAuth = (mode: 'login' | 'register' | 'forgot' | 'verify' = 'login') => {
     setAuthMode(mode);
     setIsAuthOpen(true);
   };
@@ -57,10 +56,19 @@ function MainAppContent() {
 
   const handleProceedToCheckout = () => {
     if (!isAuthenticated) {
+      setIsPendingCheckout(true);
       handleOpenAuth('login');
       return;
     }
     setIsOrderSummaryOpen(true);
+  };
+
+  const handleAuthSuccess = () => {
+    setIsAuthOpen(false);
+    if (isPendingCheckout) {
+      setIsPendingCheckout(false);
+      setIsOrderSummaryOpen(true);
+    }
   };
 
   const handleInitiateRazorpay = (orderData: any) => {
@@ -85,7 +93,6 @@ function MainAppContent() {
         onOpenAuth={handleOpenAuth}
         onOpenAdminLogin={handleOpenAdminLogin}
         onOpenCart={() => setIsCartOpen(true)}
-        onOpenEmailInbox={() => setIsEmailInboxOpen(true)}
       />
 
       {/* Main View Container */}
@@ -143,14 +150,6 @@ function MainAppContent() {
 
           <div className="flex items-center space-x-4 text-slate-400">
             <button
-              onClick={() => setIsEmailInboxOpen(true)}
-              className="hover:text-amber-400 transition-colors flex items-center space-x-1.5 font-medium"
-            >
-              <Mail className="w-3.5 h-3.5 text-amber-400" />
-              <span>System Mailbox</span>
-            </button>
-            <span className="text-slate-600">•</span>
-            <button
               onClick={() => setCurrentView('admin')}
               className="hover:text-amber-400 transition-colors flex items-center space-x-1.5 font-medium"
             >
@@ -192,14 +191,12 @@ function MainAppContent() {
       <AuthModal
         isOpen={isAuthOpen}
         initialMode={authMode}
-        onClose={() => setIsAuthOpen(false)}
-        onOpenEmailInbox={() => setIsEmailInboxOpen(true)}
-      />
-
-      <SystemEmailInboxModal
-        isOpen={isEmailInboxOpen}
-        onClose={() => setIsEmailInboxOpen(false)}
-        onNavigateToView={handleNavigate}
+        isPendingCheckout={isPendingCheckout}
+        onClose={() => {
+          setIsAuthOpen(false);
+          setIsPendingCheckout(false);
+        }}
+        onAuthSuccess={handleAuthSuccess}
       />
 
     </div>
