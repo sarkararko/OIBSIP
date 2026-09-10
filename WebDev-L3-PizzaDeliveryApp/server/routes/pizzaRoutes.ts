@@ -48,7 +48,7 @@ router.get('/builder-options', async (req: Request, res: Response): Promise<void
 // POST /api/pizzas/calculate-price - Server-side price calculation and ingredient verification
 router.post('/calculate-price', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { size, baseId, sauceId, cheeseId, veggieIds } = req.body;
+    const { size, baseId, sauceId, cheeseId, veggieIds, extraCheese } = req.body;
     const inventory = await dbService.getInventory();
 
     const base = inventory.find((i) => i.id === baseId);
@@ -60,7 +60,7 @@ router.post('/calculate-price', async (req: Request, res: Response): Promise<voi
 
     const baseCrustCost = 299 + (base?.price || 0);
     const sauceCost = sauce?.price || 0;
-    const cheeseCost = cheese?.price || 0;
+    const cheeseCost = (cheese?.price || 0) + (extraCheese ? 60 : 0);
     const veggiesCost = selectedVeggies.reduce((sum: number, v: any) => sum + (v?.price || 0), 0);
 
     const subtotal = baseCrustCost + sauceCost + cheeseCost + veggiesCost;

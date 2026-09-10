@@ -3,7 +3,7 @@ import { dbService } from '../services/dbService.js';
 import { authenticateJWT, requireAdmin, AuthRequest } from '../middleware/auth.js';
 import { runLowStockAudit } from '../services/cronService.js';
 import { UserModel } from '../models/User.js';
-import { isMongoConnected } from '../config/db.js';
+import { isMongoConnected, connectDB, getDatabaseDiagnostics } from '../config/db.js';
 import { DataStore } from '../models/index.js';
 
 const router = Router();
@@ -214,9 +214,55 @@ router.post('/inventory/alerts/trigger-check', (req: AuthRequest, res: Response)
 router.post('/reset-demo-data', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     DataStore.initDefaultData();
+    if (isMongoConnected()) {
+      await dbService.seedInitialMongoData();
+    }
     res.json({ message: 'Demo inventory & sample orders restored.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to reset demo data' });
+  }
+});
+
+// GET /api/admin/database/diagnostics - Deep MongoDB diagnostics
+router.get('/database/diagnostics', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const diag = getDatabaseDiagnostics();
+    let mongoCounts: any = null;
+    if (isMongoConnected()) {
+      const { IngredientModel } = await import('../models/Ingredient.js');
+      const { PizzaModel } = await import('../models/Pizza.js');
+      const { OrderModel } = await import('../models/Order.js');
+      const { UserModel } = await import('../models/User.js');
+      mongoCounts = {
+        ingredients: await (IngredientModel as any).countDocuments(),
+        pizzas: await (PizzaModel as any).countDocuments(),
+        orders: await (OrderModel as any).countDocuments(),
+        users: await (UserModel as any).countDocuments(),
+      };
+    }
+    res.json({
+      ...diag,
+      mongoCounts,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to get database diagnostics' });
+  }
+});
+
+// POST /api/admin/reconnect-db - Force an immediate MongoDB connection attempt
+router.post('/reconnect-db', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const connected = await connectDB(false);
+    const diag = getDatabaseDiagnostics();
+    res.json({
+      success: connected,
+      message: connected
+        ? 'Successfully connected to MongoDB Atlas! MongoDB is now active as Primary Database.'
+        : 'Connection attempt failed. Check MongoDB Atlas Network Access whitelist.',
+      diagnostics: diag,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Connection attempt error' });
   }
 });
 

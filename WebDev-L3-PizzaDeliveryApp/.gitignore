@@ -23,3 +23,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Local fallback cache
+server-data.json
+*.json.bak

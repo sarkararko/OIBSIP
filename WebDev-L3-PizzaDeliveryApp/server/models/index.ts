@@ -380,7 +380,9 @@ class StorageEngine {
 
   public saveToDisk() {
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
+      if (process.env.ENABLE_LOCAL_FILE_PERSISTENCE === 'true') {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
+      }
     } catch (err) {
       console.error('Error saving data to disk:', err);
     }

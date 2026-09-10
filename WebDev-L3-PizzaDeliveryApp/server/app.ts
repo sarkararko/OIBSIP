@@ -7,7 +7,7 @@ import orderRoutes from './routes/orderRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import emailRoutes from './routes/emailRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
-import { isMongoConnected } from './config/db.js';
+import { isMongoConnected, getDatabaseDiagnostics } from './config/db.js';
 
 export function createExpressApp(): Express {
   const app = express();
@@ -17,19 +17,18 @@ export function createExpressApp(): Express {
 
   // API Healthcheck & system status
   app.get('/api/health', (req, res) => {
+    const dbDiagnostics = getDatabaseDiagnostics();
     res.json({
       status: 'healthy',
       timestamp: new Date().toISOString(),
       service: 'PizzaCraft Artisanal Backend Engine',
       environment: process.env.NODE_ENV || 'development',
-      database: {
-        connected: isMongoConnected(),
-        mode: isMongoConnected() ? 'MongoDB Atlas' : 'Local File Persistence (server-data.json)',
-        note: isMongoConnected()
-          ? 'Connected to live MongoDB cluster'
-          : 'Operating with persistent server-data.json engine. To enable Atlas, add 0.0.0.0/0 to Atlas IP whitelist.',
-      },
+      database: dbDiagnostics,
     });
+  });
+
+  app.get('/api/database/status', (req, res) => {
+    res.json(getDatabaseDiagnostics());
   });
 
   // Mount API Routers
