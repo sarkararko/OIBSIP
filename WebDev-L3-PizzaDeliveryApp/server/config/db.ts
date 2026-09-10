@@ -1,10 +1,22 @@
 import mongoose from 'mongoose';
 import dns from 'node:dns';
-import path from 'path';
+import path from 'node:path';
+import fs from 'node:fs';
+import dotenv from 'dotenv';
 
-// Fix for Node.js / c-ares SRV lookup bug (querySrv ECONNREFUSED) on Windows and local routers:
-// Local router DNS resolvers often reject SRV queries. Explicitly configuring standard public resolvers
-// allows Node to resolve MongoDB Atlas SRV records smoothly.
+// Ensure dotenv is loaded with override: true so active credentials in .env are always picked up
+const envCandidates = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), 'WebDev-L3-PizzaDeliveryApp', '.env'),
+];
+for (const cand of envCandidates) {
+  if (fs.existsSync(cand)) {
+    dotenv.config({ path: cand, override: true });
+    break;
+  }
+}
+
+// Configure standard public DNS resolvers for Node.js / c-ares SRV lookups
 try {
   dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
 } catch {
@@ -18,10 +30,24 @@ let containerPublicIp = '34.34.244.34';
 let lastMongoError: string | null = null;
 let lastDiagnosedCategory: string | null = null;
 
-// Clean and sanitize Mongo URI (removes accidental whitespace, quotes, or trailing parameters)
-export function getSanitizedMongoUri(): string | null {
-  const raw = process.env.MONGODB_URI;
+export interface SafeMongoDetails {
+  host: string;
+  dbName: string;
+  username: string;
+}
+
+// Parses and sanitizes the MongoDB URI from environment variables.
+// Safely handles special characters in the password (RFC 3986 encoding),
+// ensures the database name is "pizzacraft", and sets authSource to "admin".
+export function parseAndSanitizeMongoUri(rawUri?: string | null): {
+  uri: string;
+  host: string;
+  dbName: string;
+  username: string;
+} | null {
+  const raw = rawUri || process.env.MONGODB_URI;
   if (!raw) return null;
+
   let cleaned = raw.trim();
 
   // Strip surrounding quotes if present
@@ -35,26 +61,93 @@ export function getSanitizedMongoUri(): string | null {
   // Remove whitespace
   cleaned = cleaned.replace(/\s+/g, '');
 
-  if (!cleaned.startsWith('mongodb://') && !cleaned.startsWith('mongodb+srv://')) {
-    return null;
+  const protoMatch = cleaned.match(/^(mongodb(?:\+srv)?:\/\/)/);
+  if (!protoMatch) return null;
+  const proto = protoMatch[1];
+  const rest = cleaned.slice(proto.length);
+
+  // Use the last '@' before host/database so passwords containing '@' do not break parsing
+  const lastAtIndex = rest.lastIndexOf('@');
+  if (lastAtIndex === -1) return null;
+
+  const authPart = rest.slice(0, lastAtIndex);
+  const hostAndDbPart = rest.slice(lastAtIndex + 1);
+
+  // Split username and password on the first ':' in the auth portion
+  const colonIndex = authPart.indexOf(':');
+  if (colonIndex === -1) return null;
+
+  const rawUser = authPart.slice(0, colonIndex);
+  const rawPass = authPart.slice(colonIndex + 1);
+
+  // Decode first to avoid double-encoding, then properly encode special characters for the driver
+  const decodedUser = decodeURIComponent(rawUser);
+  const decodedPass = decodeURIComponent(rawPass);
+
+  const safeUser = encodeURIComponent(decodedUser);
+  const safePass = encodeURIComponent(decodedPass);
+
+  // Parse host and database name
+  let host = hostAndDbPart;
+  let dbName = 'pizzacraft';
+  let query = '';
+
+  const slashIndex = hostAndDbPart.indexOf('/');
+  const qIndex = hostAndDbPart.indexOf('?');
+
+  if (slashIndex !== -1) {
+    host = hostAndDbPart.slice(0, slashIndex);
+    const afterSlash = hostAndDbPart.slice(slashIndex + 1);
+    const qInAfter = afterSlash.indexOf('?');
+    if (qInAfter !== -1) {
+      dbName = afterSlash.slice(0, qInAfter) || 'pizzacraft';
+      query = afterSlash.slice(qInAfter + 1);
+    } else {
+      dbName = afterSlash || 'pizzacraft';
+    }
+  } else if (qIndex !== -1) {
+    host = hostAndDbPart.slice(0, qIndex);
+    query = hostAndDbPart.slice(qIndex + 1);
   }
 
-  return cleaned;
+  // Ensure query parameters include authSource=admin for Atlas authentication
+  const searchParams = new URLSearchParams(query);
+  if (!searchParams.has('authSource')) {
+    searchParams.set('authSource', 'admin');
+  }
+
+  const queryString = searchParams.toString() ? '?' + searchParams.toString() : '';
+  const finalUri = `${proto}${safeUser}:${safePass}@${host}/${dbName}${queryString}`;
+
+  return {
+    uri: finalUri,
+    host,
+    dbName,
+    username: decodedUser,
+  };
 }
 
-// Safely extract cluster host without credentials for logging and UI
+// Clean and sanitize Mongo URI string for Mongoose connection
+export function getSanitizedMongoUri(): string | null {
+  const parsed = parseAndSanitizeMongoUri();
+  return parsed ? parsed.uri : null;
+}
+
+// Safely extract MongoDB host, database name, and username without ever exposing the password
+export function getSafeMongoDetails(): SafeMongoDetails | null {
+  const parsed = parseAndSanitizeMongoUri();
+  if (!parsed) return null;
+  return {
+    host: parsed.host,
+    dbName: parsed.dbName,
+    username: parsed.username,
+  };
+}
+
+// Safely extract cluster host for UI and logging
 export function getClusterHost(): string {
-  const uri = getSanitizedMongoUri();
-  if (!uri) return 'Not Configured';
-  try {
-    const afterAt = uri.split('@')[1];
-    if (afterAt) {
-      return afterAt.split('/')[0].split('?')[0];
-    }
-  } catch {
-    // Fallback
-  }
-  return 'MongoDB Atlas Cluster';
+  const details = getSafeMongoDetails();
+  return details ? details.host : 'MongoDB Atlas Cluster';
 }
 
 export function isMongoConnected(): boolean {
@@ -118,64 +211,6 @@ export function diagnoseMongoError(err: any): { category: string; message: strin
   };
 }
 
-// Convert mongodb+srv:// to direct replica set URI to bypass local SRV DNS issues
-async function resolveMongoSrvToDirectUri(srvUri: string): Promise<string | null> {
-  try {
-    const match = srvUri.match(/^mongodb\+srv:\/\/([^:]+):([^@]+)@([^\/\?]+)\/?([^\?]*)(\?.*)?$/);
-    if (!match) return null;
-    const [, username, password, hostname, dbName] = match;
-
-    let shardHosts: string[] = [];
-    let replicaSet = 'atlas-yq6og4-shard-0';
-    let authSource = 'admin';
-
-    try {
-      const addresses = await new Promise<dns.SrvRecord[]>((resolve, reject) => {
-        dns.resolveSrv(`_mongodb._tcp.${hostname}`, (err, addrs) => {
-          if (err) reject(err);
-          else resolve(addrs);
-        });
-      });
-      if (addresses && addresses.length > 0) {
-        shardHosts = addresses.map((a) => `${a.name}:${a.port}`);
-      }
-    } catch {
-      // Direct known shard nodes for pizzacraftcluster
-      if (hostname.includes('pizzacraftcluster.ixxjdxp.mongodb.net')) {
-        shardHosts = [
-          'ac-votuwiv-shard-00-00.ixxjdxp.mongodb.net:27017',
-          'ac-votuwiv-shard-00-01.ixxjdxp.mongodb.net:27017',
-          'ac-votuwiv-shard-00-02.ixxjdxp.mongodb.net:27017',
-        ];
-      }
-    }
-
-    if (shardHosts.length === 0) return null;
-
-    try {
-      const txt = await new Promise<string[][]>((resolve, reject) => {
-        dns.resolveTxt(hostname, (err, records) => {
-          if (err) reject(err);
-          else resolve(records);
-        });
-      });
-      if (txt && txt.length > 0) {
-        const flat = txt.flat().join('&');
-        const params = new URLSearchParams(flat);
-        if (params.get('replicaSet')) replicaSet = params.get('replicaSet')!;
-        if (params.get('authSource')) authSource = params.get('authSource')!;
-      }
-    } catch {
-      // Keep defaults
-    }
-
-    const targetDb = dbName || 'pizzacraft';
-    return `mongodb://${username}:${password}@${shardHosts.join(',')}/${targetDb}?ssl=true&replicaSet=${replicaSet}&authSource=${authSource}`;
-  } catch {
-    return null;
-  }
-}
-
 // Detect container outbound public IP for Atlas whitelisting
 async function detectContainerIp(): Promise<void> {
   try {
@@ -191,24 +226,36 @@ async function detectContainerIp(): Promise<void> {
   }
 }
 
-// Connect to MongoDB Atlas
-export async function connectDB(throwOnError?: boolean): Promise<boolean> {
+let reconnectInterval: NodeJS.Timeout | null = null;
+
+// Periodically attempt reconnection in the background without blocking server operations
+export function startAutoReconnect(): void {
+  if (reconnectInterval) return;
+  reconnectInterval = setInterval(async () => {
+    if (!isMongoConnected()) {
+      console.log('🔄 Attempting background connection to MongoDB Atlas...');
+      await connectDB(false);
+    }
+  }, 15000);
+}
+
+// Connect to MongoDB Atlas (Single active connection configuration)
+export async function connectDB(throwOnError: boolean = false): Promise<boolean> {
+  if (mongoose.connection.readyState === 1 && mongoConnected) {
+    return true;
+  }
+
   detectContainerIp().catch(() => {});
 
-  const mongoUri = getSanitizedMongoUri();
-  const allowFallback = process.env.ALLOW_LOCAL_FALLBACK === 'true';
-  const shouldThrow = throwOnError !== undefined ? throwOnError : !allowFallback;
-
-  if (!mongoUri) {
+  const parsed = parseAndSanitizeMongoUri();
+  if (!parsed) {
     const errorMsg = 'MONGODB_URI is not defined or is malformed in environment variables.';
-    if (!shouldThrow) {
-      console.warn(`⚠️ ${errorMsg} Running in temporary local fallback mode.`);
-      mongoConnected = false;
-      return false;
-    }
     console.error(`❌ ${errorMsg}`);
-    console.error('❌ Set MONGODB_URI in .env, or set ALLOW_LOCAL_FALLBACK=true for offline local development.');
-    throw new Error(errorMsg);
+    console.error('❌ Set a valid MONGODB_URI in .env.');
+    if (throwOnError) {
+      throw new Error(errorMsg);
+    }
+    return false;
   }
 
   // Disconnect any stale connection before fresh connect
@@ -221,50 +268,27 @@ export async function connectDB(throwOnError?: boolean): Promise<boolean> {
   }
 
   try {
-    // Primary attempt using configured URI
-    await mongoose.connect(mongoUri, {
-      serverSelectionTimeoutMS: 10000,
-      connectTimeoutMS: 10000,
+    // Single active connection to MongoDB Atlas using sanitized URI and standard Mongoose configuration
+    await mongoose.connect(parsed.uri, {
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 5000,
+      dbName: 'pizzacraft',
+      authSource: 'admin',
     });
-  } catch (primaryErr: any) {
-    const diag = diagnoseMongoError(primaryErr);
+  } catch (err: any) {
+    mongoConnected = false;
+    const diag = diagnoseMongoError(err);
+    lastMongoError = diag.message;
+    lastDiagnosedCategory = diag.category;
 
-    // If DNS SRV query failed on local resolver, attempt direct replica set connection
-    if (diag.category === 'DNS_SRV_RESOLUTION_ERROR' && mongoUri.startsWith('mongodb+srv://')) {
-      console.info('ℹ️ DNS SRV query was refused by local resolver. Attempting direct replica set resolution...');
-      const directUri = await resolveMongoSrvToDirectUri(mongoUri);
-      if (directUri) {
-        try {
-          await mongoose.connect(directUri, {
-            serverSelectionTimeoutMS: 10000,
-            connectTimeoutMS: 10000,
-          });
-        } catch (directErr: any) {
-          primaryErr = directErr;
-        }
-      }
+    console.warn(`⚠️ Warning: MongoDB Atlas connection pending [${diag.category}].`);
+    console.warn(`⚠️ Diagnostic: ${diag.message}`);
+    console.warn(`⚠️ Action Required: ${diag.hint}`);
+
+    if (throwOnError) {
+      throw new Error(`MongoDB connection failed: ${diag.category} - ${diag.message}`);
     }
-
-    if (mongoose.connection.readyState !== 1) {
-      mongoConnected = false;
-      const finalDiag = diagnoseMongoError(primaryErr);
-      lastMongoError = finalDiag.message;
-      lastDiagnosedCategory = finalDiag.category;
-
-      if (!shouldThrow) {
-        console.warn(`⚠️ MongoDB Atlas connection unsuccessful [${finalDiag.category}].`);
-        console.warn(`⚠️ Details: ${finalDiag.message}`);
-        console.warn('⚠️ Running in temporary local fallback mode.');
-        return false;
-      }
-
-      console.error(`❌ Fatal: Failed to connect to MongoDB Atlas [${finalDiag.category}].`);
-      console.error(`❌ Diagnostic: ${finalDiag.message}`);
-      console.error(`❌ Action Required: ${finalDiag.hint}`);
-      console.error('❌ MongoDB Atlas is the required primary database for this application.');
-      console.error('❌ (To enable temporary offline development fallback, explicitly set ALLOW_LOCAL_FALLBACK=true in .env)');
-      throw new Error(`MongoDB connection failed: ${finalDiag.category} - ${finalDiag.message}`);
-    }
+    return false;
   }
 
   // Verify connection state
@@ -286,6 +310,9 @@ export async function connectDB(throwOnError?: boolean): Promise<boolean> {
   }
 
   mongoConnected = false;
+  if (throwOnError) {
+    throw new Error('MongoDB connection verification failed (connection state !== 1)');
+  }
   return false;
 }
 
@@ -293,13 +320,16 @@ export function getDatabaseDiagnostics(): any {
   const connected = isMongoConnected();
   const configured = !!getSanitizedMongoUri();
   const host = getClusterHost();
+  const details = getSafeMongoDetails();
 
   return {
     connected,
     configured,
     primaryDatabase: 'MongoDB Atlas',
-    activeEngine: connected ? 'MongoDB Atlas (Primary)' : 'In-Memory Fallback (Action Required for Atlas)',
+    activeEngine: connected ? 'MongoDB Atlas (Primary)' : 'Disconnected (MongoDB Atlas Required)',
     clusterHost: host,
+    databaseName: details?.dbName || 'pizzacraft',
+    username: details?.username || 'Not Available',
     containerPublicIp,
     lastMongoError,
     lastDiagnosedCategory,
@@ -310,7 +340,7 @@ export function getDatabaseDiagnostics(): any {
       step1: 'Open MongoDB Atlas (https://cloud.mongodb.com)',
       step2: 'Navigate to Security -> Network Access',
       step3: 'Click "+ ADD IP ADDRESS"',
-      step4: `Select "ALLOW ACCESS FROM ANYWHERE" (0.0.0.0/0) or add current container IP: ${containerPublicIp}/32`,
+      step4: `Select "ALLOW ACCESS FROM ANYWHERE" (0.0.0.0/0) or add your current IP address.`,
       step5: 'Click Confirm and wait 30 seconds for Atlas deployment to complete.',
       step6: 'Restart server to verify immediate connection.',
     },

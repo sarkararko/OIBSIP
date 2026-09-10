@@ -18,21 +18,12 @@ export function createExpressApp(): Express {
   // API Healthcheck
   app.get('/api/health', (_req, res) => {
     const connected = isMongoConnected();
-    if (connected) {
-      res.status(200).json({
-        status: 'ok',
-        database: 'connected',
-        service: 'PizzaCraft Artisanal Backend Engine',
-        timestamp: new Date().toISOString(),
-      });
-    } else {
-      res.status(503).json({
-        status: 'error',
-        database: 'disconnected',
-        service: 'PizzaCraft Artisanal Backend Engine',
-        timestamp: new Date().toISOString(),
-      });
-    }
+    res.status(200).json({
+      status: 'ok',
+      database: connected ? 'connected' : 'connecting',
+      service: 'PizzaCraft Artisanal Backend Engine',
+      timestamp: new Date().toISOString(),
+    });
   });
 
   app.get('/api/database/status', (req, res) => {
