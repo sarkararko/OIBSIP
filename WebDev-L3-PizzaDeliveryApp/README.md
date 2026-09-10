@@ -5,6 +5,7 @@
 > **Level:** Level 3 – Advanced Task  
 > **Task:** Pizza Delivery Full-Stack Application  
 > **Project Name:** PizzaCraft  
+> **Live Website URL:** [PizzaCraft](https://pizzacraft-oibsip.vercel.app/)  
 > **Repository:** [OIBSIP/WebDev-L3-PizzaDeliveryApp](https://github.com/Arkoparno/OIBSIP/tree/main/WebDev-L3-PizzaDeliveryApp)  
 > **Developer:** Arkoparno De Sarkar
 
@@ -198,7 +199,7 @@ The `screenshots/` directory is prepared for project visuals:
 
 ## 🌐 Demo & Deployment
 
-- **Live Demonstration URL:** [PizzaCraft Live Demo](https://ais-dev-vrhzk2ps7mwg5wryxg3bhj-87842825276.asia-east1.run.app)
+- **Live Website URL:**  [PizzaCraft](https://pizzacraft-oibsip.vercel.app/)  
 - **Deployment Platform:** Cloud Run / Vercel / Node.js
 - **Walkthrough Video Guide:** See [docs/DEMO_VIDEO_GUIDE.md](docs/DEMO_VIDEO_GUIDE.md)
 
