@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { apiUrl } from '../config/api';
 
 interface OrderSummaryModalProps {
   isOpen: boolean;
@@ -74,7 +75,7 @@ export const OrderSummaryModal: React.FC<OrderSummaryModalProps> = ({
       const token = localStorage.getItem('pizzacraft_token');
 
       // Call backend to create Razorpay Order
-      const res = await fetch('/api/orders/create-razorpay-order', {
+      const res = await fetch(apiUrl('/api/orders/create-razorpay-order'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

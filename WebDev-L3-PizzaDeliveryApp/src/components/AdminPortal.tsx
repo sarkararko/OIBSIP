@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { InventoryItem, Order, OrderStatus, SystemEmail } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { apiUrl } from '../config/api';
 
 export const AdminPortal: React.FC = () => {
   const { user, isAdmin, login } = useAuth();
@@ -84,10 +85,10 @@ export const AdminPortal: React.FC = () => {
       if (!token) return;
 
       const [invRes, ordRes, emailRes, diagRes] = await Promise.all([
-        fetch('/api/admin/inventory', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/admin/orders', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/emails'),
-        fetch('/api/admin/database/diagnostics', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(apiUrl('/api/admin/inventory'), { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(apiUrl('/api/admin/orders'), { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(apiUrl('/api/emails')),
+        fetch(apiUrl('/api/admin/database/diagnostics'), { headers: { Authorization: `Bearer ${token}` } }),
       ]);
 
       if (invRes.ok) {
@@ -121,7 +122,7 @@ export const AdminPortal: React.FC = () => {
     setIsReconnectingDb(true);
     try {
       const token = localStorage.getItem('pizzacraft_token');
-      const res = await fetch('/api/admin/reconnect-db', {
+      const res = await fetch(apiUrl('/api/admin/reconnect-db'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -146,7 +147,7 @@ export const AdminPortal: React.FC = () => {
     setIsLoggingIn(true);
 
     try {
-      const res = await fetch('/api/auth/admin-login', {
+      const res = await fetch(apiUrl('/api/auth/admin-login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: adminEmail, password: adminPassword })
@@ -170,7 +171,7 @@ export const AdminPortal: React.FC = () => {
   const handleAdjustStock = async (itemId: string, delta: number) => {
     try {
       const token = localStorage.getItem('pizzacraft_token');
-      const res = await fetch(`/api/admin/inventory/${itemId}/adjust`, {
+      const res = await fetch(apiUrl(`/api/admin/inventory/${encodeURIComponent(itemId)}/adjust`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -193,7 +194,7 @@ export const AdminPortal: React.FC = () => {
   const handleSaveItemEdit = async (itemId: string) => {
     try {
       const token = localStorage.getItem('pizzacraft_token');
-      const res = await fetch(`/api/admin/inventory/${itemId}`, {
+      const res = await fetch(apiUrl(`/api/admin/inventory/${encodeURIComponent(itemId)}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -216,7 +217,7 @@ export const AdminPortal: React.FC = () => {
   const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
     try {
       const token = localStorage.getItem('pizzacraft_token');
-      const res = await fetch(`/api/admin/orders/${orderId}/status`, {
+      const res = await fetch(apiUrl(`/api/admin/orders/${encodeURIComponent(orderId)}/status`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -239,7 +240,7 @@ export const AdminPortal: React.FC = () => {
   const handleTriggerCronStockCheck = async () => {
     try {
       const token = localStorage.getItem('pizzacraft_token');
-      const res = await fetch('/api/admin/inventory/alerts/trigger-check', {
+      const res = await fetch(apiUrl('/api/admin/inventory/alerts/trigger-check'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -259,7 +260,7 @@ export const AdminPortal: React.FC = () => {
     if (!window.confirm('Reset all inventory and orders to default factory demo state?')) return;
     try {
       const token = localStorage.getItem('pizzacraft_token');
-      const res = await fetch('/api/admin/reset-demo-data', {
+      const res = await fetch(apiUrl('/api/admin/reset-demo-data'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });

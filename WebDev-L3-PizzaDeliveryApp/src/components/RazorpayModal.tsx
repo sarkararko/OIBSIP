@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useCart } from '../context/CartContext';
+import { apiUrl } from '../config/api';
 
 interface RazorpayModalProps {
   isOpen: boolean;
@@ -48,7 +49,7 @@ export const RazorpayModal: React.FC<RazorpayModalProps> = ({
       const token = localStorage.getItem('pizzacraft_token');
 
       // Call backend to confirm order and automatically decrement stock
-      const res = await fetch('/api/orders/confirm', {
+      const res = await fetch(apiUrl('/api/orders/confirm'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

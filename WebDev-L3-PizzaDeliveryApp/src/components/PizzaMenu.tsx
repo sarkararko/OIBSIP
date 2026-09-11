@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { PresetPizza } from '../types';
 import { useCart } from '../context/CartContext';
+import { apiUrl } from '../config/api';
 
 interface PizzaMenuProps {
   onCustomizePreset: (pizza: PresetPizza) => void;
@@ -39,14 +40,14 @@ export const PizzaMenu: React.FC<PizzaMenuProps> = ({
   const fetchMenu = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/menu/pizzas');
+      const res = await fetch(apiUrl('/api/menu/pizzas'));
       if (res.ok) {
         const data = await res.json();
         setPizzas(data.presetPizzas || []);
       }
       
       // Also fetch options to check any out of stock items
-      const optRes = await fetch('/api/menu/options');
+      const optRes = await fetch(apiUrl('/api/menu/options'));
       if (optRes.ok) {
         const optData = await optRes.json();
         const outOfStock: string[] = [];

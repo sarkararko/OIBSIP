@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Order, OrderStatus } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { apiUrl } from '../config/api';
 
 interface OrderTrackingViewProps {
   initialOrderId?: string | null;
@@ -51,7 +52,7 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
       let fetchedOrders: Order[] = [];
 
       if (token) {
-        const res = await fetch('/api/orders/my-orders', {
+        const res = await fetch(apiUrl('/api/orders/my-orders'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (res.ok) {
@@ -62,7 +63,7 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
 
       // If initialOrderId passed (e.g. from guest checkout or direct link), also fetch it
       if (initialOrderId) {
-        const trackRes = await fetch(`/api/orders/track/${initialOrderId}`);
+        const trackRes = await fetch(apiUrl(`/api/orders/track/${encodeURIComponent(initialOrderId)}`));
         if (trackRes.ok) {
           const trackData = await trackRes.json();
           if (trackData.order && !fetchedOrders.some(o => o.id === trackData.order.id)) {

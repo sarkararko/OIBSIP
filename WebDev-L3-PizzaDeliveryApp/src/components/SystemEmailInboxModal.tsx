@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { SystemEmail } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { apiUrl } from '../config/api';
 
 interface SystemEmailInboxModalProps {
   isOpen: boolean;
@@ -40,7 +41,7 @@ export const SystemEmailInboxModal: React.FC<SystemEmailInboxModalProps> = ({
   const fetchEmails = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/emails');
+      const res = await fetch(apiUrl('/api/emails'));
       if (res.ok) {
         const data = await res.json();
         setEmails(data.emails || []);
@@ -60,7 +61,7 @@ export const SystemEmailInboxModal: React.FC<SystemEmailInboxModalProps> = ({
   const handleExecuteEmailAction = async (email: SystemEmail) => {
     // Mark as read
     try {
-      await fetch('/api/emails/mark-read', {
+      await fetch(apiUrl('/api/emails/mark-read'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: email.id })
@@ -76,7 +77,7 @@ export const SystemEmailInboxModal: React.FC<SystemEmailInboxModalProps> = ({
 
       if (token) {
         try {
-          const res = await fetch('/api/auth/verify-email', {
+          const res = await fetch(apiUrl('/api/auth/verify-email'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token, email: email.to })
@@ -105,7 +106,7 @@ export const SystemEmailInboxModal: React.FC<SystemEmailInboxModalProps> = ({
       if (token) {
         const newPass = prompt(`Reset Password for ${email.to}\nEnter your new password:`, 'newpassword123');
         if (newPass) {
-          const res = await fetch('/api/auth/reset-password', {
+          const res = await fetch(apiUrl('/api/auth/reset-password'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token, newPassword: newPass })
