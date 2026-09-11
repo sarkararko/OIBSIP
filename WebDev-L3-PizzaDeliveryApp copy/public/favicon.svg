@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="crust" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EA580C" />
+      <stop offset="100%" stop-color="#C2410C" />
+    </linearGradient>
+    <linearGradient id="cheese" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE047" />
+      <stop offset="100%" stop-color="#F59E0B" />
+    </linearGradient>
+  </defs>
+  <!-- Pizza Slice Crust -->
+  <path d="M 8 14 Q 32 4 56 14 L 32 58 Z" fill="url(#crust)" stroke="#9A3412" stroke-width="2" />
+  <!-- Cheese layer -->
+  <path d="M 12 17 Q 32 8 52 17 L 32 54 Z" fill="url(#cheese)" />
+  <!-- Pepperoni / Toppings -->
+  <circle cx="28" cy="24" r="4.5" fill="#DC2626" />
+  <circle cx="38" cy="30" r="4" fill="#DC2626" />
+  <circle cx="26" cy="38" r="3.5" fill="#DC2626" />
+  <!-- Basil leaves -->
+  <path d="M 33 20 Q 37 18 36 23 Q 32 23 33 20 Z" fill="#16A34A" />
+  <path d="M 31 32 Q 35 30 34 35 Q 30 35 31 32 Z" fill="#16A34A" />
+  <!-- Olive -->
+  <circle cx="36" cy="42" r="2.5" fill="#18181B" />
+</svg>

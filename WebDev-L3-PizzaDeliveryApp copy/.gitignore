@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Production Build outputs
+dist/
+build/
+coverage/
+
+# Environment variables & secrets (Never commit secrets)
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+!.env.example
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+*.swp
+
+# Local fallback cache
+server-data.json
+*.json.bak
