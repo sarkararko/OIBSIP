@@ -1,5 +1,11 @@
+import dns from 'node:dns';
 import nodemailer from 'nodemailer';
 import { DataStore } from '../models/index.js';
+
+// Ensure Node.js prefers IPv4 DNS resolution across network operations
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 export interface EmailPayload {
   to: string;
@@ -74,10 +80,11 @@ export function createMailTransporter(): ReturnType<typeof nodemailer.createTran
     tls: {
       rejectUnauthorized: false,
     },
+    family: 4,
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
-  });
+  } as any);
 }
 
 /**
