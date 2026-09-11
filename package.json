@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "npm --prefix WebDev-L3-PizzaDeliveryApp run dev",
     "build": "npm --prefix WebDev-L3-PizzaDeliveryApp run build:full && cp -r WebDev-L3-PizzaDeliveryApp/dist .",
+    "build:full": "npm --prefix WebDev-L3-PizzaDeliveryApp run build:full && cp -r WebDev-L3-PizzaDeliveryApp/dist .",
     "build:server": "npm --prefix WebDev-L3-PizzaDeliveryApp run build:server",
     "start": "npm --prefix WebDev-L3-PizzaDeliveryApp run start",
     "preview": "npm --prefix WebDev-L3-PizzaDeliveryApp run preview",

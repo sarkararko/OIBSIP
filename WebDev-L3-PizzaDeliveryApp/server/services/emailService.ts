@@ -50,6 +50,21 @@ export function getSmtpConfigInfo(): SmtpConfigInfo {
 }
 
 /**
+ * Explicit IPv4 DNS lookup function for Nodemailer SMTP connections.
+ * Forces resolution to IPv4 address family to prevent ENETUNREACH errors in IPv6-unreachable environments.
+ */
+const ipv4Lookup = (
+  hostname: string,
+  options: any,
+  callback: any
+) => {
+  const cb = typeof options === 'function' ? options : callback;
+  const lookupOptions =
+    typeof options === 'object' && options !== null ? { ...options, family: 4 } : { family: 4 };
+  return dns.lookup(hostname, lookupOptions, cb);
+};
+
+/**
  * Creates and returns an initialized Nodemailer SMTP transporter.
  * Throws an error if required credentials are not configured.
  */
@@ -79,8 +94,9 @@ export function createMailTransporter(): ReturnType<typeof nodemailer.createTran
     },
     tls: {
       rejectUnauthorized: false,
+      lookup: ipv4Lookup,
     },
-    family: 4,
+    lookup: ipv4Lookup,
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
