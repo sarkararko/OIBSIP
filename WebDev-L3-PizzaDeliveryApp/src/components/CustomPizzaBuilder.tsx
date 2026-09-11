@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { InventoryItem, CustomPizzaConfig, PresetPizza } from '../types';
 import { useCart } from '../context/CartContext';
-import { apiUrl } from '../config/api';
+import { apiUrl, apiFetch } from '../config/api';
 
 interface CustomPizzaBuilderProps {
   initialPreset?: PresetPizza | null;
@@ -57,7 +57,7 @@ export const CustomPizzaBuilder: React.FC<CustomPizzaBuilderProps> = ({
   const fetchOptions = async () => {
     try {
       setLoading(true);
-      const res = await fetch(apiUrl('/api/menu/options'));
+      const res = await apiFetch('/api/menu/options');
       if (res.ok) {
         const data = await res.json();
         setBases(data.bases || []);

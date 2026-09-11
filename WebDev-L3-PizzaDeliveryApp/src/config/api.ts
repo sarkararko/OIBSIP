@@ -14,30 +14,89 @@
  */
 
 // Safely access Vite environment variables
-const envApiUrl = (
+const rawEnvApiUrl = (
   typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL
     ? String((import.meta as any).env.VITE_API_URL)
     : ''
 ).trim();
 
-// Clean any trailing slashes from the API URL
-export const API_BASE_URL: string = envApiUrl ? envApiUrl.replace(/\/+$/, '') : '';
+/**
+ * Checks if the current execution context is a self-contained full-stack environment,
+ * such as Google Cloud Run (AI Studio preview / deployment) or local development.
+ * In these environments, the Express backend runs directly alongside the frontend on port 3000,
+ * so all /api/* requests must use relative paths to avoid CORS issues and external server downtime.
+ */
+export function isSelfContainedHost(): boolean {
+  if (typeof window === 'undefined') return true;
+  const hostname = window.location.hostname.toLowerCase();
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname.endsWith('.run.app') ||
+    hostname.includes('googleusercontent.com')
+  );
+}
 
 /**
- * Transforms a relative API path into a fully qualified URL when VITE_API_URL is defined,
- * or preserves relative pathing when running against a local dev proxy/server.
+ * Returns the active API base URL.
+ * In self-contained hosts (AI Studio / localhost), returns empty string to use relative /api paths.
+ */
+export function getApiBaseUrl(): string {
+  if (isSelfContainedHost()) {
+    return '';
+  }
+  return rawEnvApiUrl ? rawEnvApiUrl.replace(/\/+$/, '') : '';
+}
+
+// Clean any trailing slashes from the API URL
+export const API_BASE_URL: string = getApiBaseUrl();
+
+/**
+ * Transforms a relative API path into a fully qualified URL when appropriate,
+ * or preserves relative pathing when running in a self-contained container / dev server.
  * 
  * @param path Relative path, e.g. '/api/menu/pizzas' or 'api/auth/login'
  * @returns Fully formatted API endpoint URL
  */
 export function apiUrl(path: string): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const baseUrl = getApiBaseUrl();
 
-  if (!API_BASE_URL) {
+  if (!baseUrl) {
     return normalizedPath;
   }
 
-  return `${API_BASE_URL}${normalizedPath}`;
+  return `${baseUrl}${normalizedPath}`;
+}
+
+/**
+ * Resilient fetch wrapper:
+ * Automatically calls apiUrl(path).
+ * If an external URL fails due to a network error or CORS 403,
+ * it automatically falls back to relative /api/... to prevent breaking the application.
+ */
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const primaryUrl = apiUrl(path);
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  try {
+    const res = await fetch(primaryUrl, init);
+    // If the external backend responded with 403 (CORS rejection) or 502/503/504 gateway down,
+    // retry with relative path if different
+    if (!res.ok && primaryUrl.startsWith('http') && (res.status === 403 || res.status >= 502)) {
+      if (primaryUrl !== normalizedPath) {
+        console.warn(`[apiFetch] Primary request to ${primaryUrl} returned HTTP ${res.status}. Falling back to relative path ${normalizedPath}...`);
+        return await fetch(normalizedPath, init);
+      }
+    }
+    return res;
+  } catch (err) {
+    if (primaryUrl !== normalizedPath) {
+      console.warn(`[apiFetch] Primary request to ${primaryUrl} failed (${(err as any)?.message || err}). Falling back to relative path ${normalizedPath}...`);
+      return await fetch(normalizedPath, init);
+    }
+    throw err;
+  }
 }
 
 /**
