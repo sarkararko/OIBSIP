@@ -5,16 +5,16 @@
   "description": "Oasis Infobyte Internship Program (OIBSIP) - Level 3 Pizza Delivery Full-Stack Application (PizzaCraft)",
   "author": "Arkoparno De Sarkar",
   "type": "module",
- "scripts": {
-  "dev": "tsx server.ts",
-  "build": "vite build",
-  "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-  "build:full": "vite build && npm run build:server",
-  "start": "node dist/server.cjs",
-  "preview": "vite preview",
-  "clean": "rm -rf dist server.cjs",
-  "lint": "tsc --noEmit"
-},
+  "scripts": {
+    "dev": "tsx server.ts",
+    "build": "vite build",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build:full": "vite build && npm run build:server",
+    "start": "node dist/server.cjs",
+    "preview": "vite preview",
+    "clean": "rm -rf dist server.cjs",
+    "lint": "tsc --noEmit"
+  },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
@@ -40,10 +40,10 @@
     "vite": "^6.2.3"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^8.0.1",
-    "@types/cors": "^2.8.17",
     "@vercel/node": "^12.0.3",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
