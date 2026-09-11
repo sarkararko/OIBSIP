@@ -40,6 +40,14 @@ export function createExpressApp(): Express {
         return callback(null, true);
       }
 
+      // Allow any Cloud Run / AI Studio domain (*.run.app and *.googleusercontent.com)
+      if (
+        /^https:\/\/[a-zA-Z0-9_.-]+\.run\.app$/.test(origin) ||
+        /^https:\/\/[a-zA-Z0-9_.-]+\.googleusercontent\.com$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
+
       // Allow localhost / 127.0.0.1 on any port in development
       if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
         return callback(null, true);

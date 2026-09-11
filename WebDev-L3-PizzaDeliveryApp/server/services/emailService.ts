@@ -1,10 +1,31 @@
-import dns from 'node:dns';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { DataStore } from '../models/index.js';
 
-// Ensure Node.js prefers IPv4 DNS resolution across network operations
-if (typeof dns.setDefaultResultOrder === 'function') {
-  dns.setDefaultResultOrder('ipv4first');
+let resendClient: Resend | null = null;
+
+/**
+ * Returns an initialized Resend API client using the environment API key.
+ * Throws a clear error if RESEND_API_KEY is not configured.
+ */
+export function getResendClient(): Resend {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error(
+      'RESEND_API_KEY is missing. Please configure RESEND_API_KEY in your environment variables.'
+    );
+  }
+  if (!resendClient) {
+    resendClient = new Resend(apiKey);
+  }
+  return resendClient;
+}
+
+/**
+ * Resolves the configured sender email address.
+ * Falls back to the Resend testing sender (onboarding@resend.dev) if EMAIL_FROM is not explicitly defined.
+ */
+export function getSenderEmail(): string {
+  return process.env.EMAIL_FROM?.trim() || 'PizzaCraft <onboarding@resend.dev>';
 }
 
 export interface EmailPayload {
@@ -27,94 +48,33 @@ export interface SmtpConfigInfo {
 }
 
 /**
- * Reads and returns sanitized SMTP configuration info without exposing passwords.
+ * Reads and returns email delivery configuration info.
+ * Maintained for backward compatibility.
  */
 export function getSmtpConfigInfo(): SmtpConfigInfo {
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = Number(process.env.SMTP_PORT) || 465;
-  const isSecure =
-    process.env.SMTP_SECURE === 'true' ||
-    process.env.SMTP_SECURE === '1' ||
-    port === 465;
-  const user = process.env.SMTP_USER || '';
-  const from = process.env.EMAIL_FROM || (user ? `PizzaCraft <${user}>` : 'PizzaCraft <noreply@pizzacraft.com>');
+  const isConfigured = Boolean(process.env.RESEND_API_KEY?.trim());
+  const from = getSenderEmail();
 
   return {
-    isConfigured: Boolean(process.env.SMTP_USER && process.env.SMTP_PASS),
-    host,
-    port,
-    secure: isSecure,
-    userConfigured: Boolean(process.env.SMTP_USER),
+    isConfigured,
+    host: 'api.resend.com',
+    port: 443,
+    secure: true,
+    userConfigured: isConfigured,
     fromAddress: from,
   };
 }
 
 /**
- * Explicit IPv4 DNS lookup function for Nodemailer SMTP connections.
- * Forces resolution to IPv4 address family to prevent ENETUNREACH errors in IPv6-unreachable environments.
- */
-const ipv4Lookup = (
-  hostname: string,
-  options: any,
-  callback: any
-) => {
-  const cb = typeof options === 'function' ? options : callback;
-  const lookupOptions =
-    typeof options === 'object' && options !== null ? { ...options, family: 4 } : { family: 4 };
-  return dns.lookup(hostname, lookupOptions, cb);
-};
-
-/**
- * Creates and returns an initialized Nodemailer SMTP transporter.
- * Throws an error if required credentials are not configured.
- */
-export function createMailTransporter(): ReturnType<typeof nodemailer.createTransport> {
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = Number(process.env.SMTP_PORT) || 465;
-  const isSecure =
-    process.env.SMTP_SECURE === 'true' ||
-    process.env.SMTP_SECURE === '1' ||
-    port === 465;
-  const user = process.env.SMTP_USER?.trim();
-  const pass = process.env.SMTP_PASS?.trim();
-
-  if (!user || !pass) {
-    throw new Error(
-      'SMTP credentials are missing. Please configure SMTP_USER and SMTP_PASS (Gmail App Password) in your environment variables.'
-    );
-  }
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: isSecure,
-    auth: {
-      user,
-      pass,
-    },
-    tls: {
-      rejectUnauthorized: false,
-      lookup: ipv4Lookup,
-    },
-    lookup: ipv4Lookup,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-  } as any);
-}
-
-/**
- * Sends a real PizzaCraft verification email containing a 6-digit OTP.
+ * Sends a real PizzaCraft verification email containing a 6-digit OTP using the Resend Email API.
  */
 export async function sendVerificationEmail(
   to: string,
   name: string,
   otp: string
 ): Promise<{ success: boolean; messageId: string }> {
-  const transporter = createMailTransporter();
-  const fromAddress =
-    process.env.EMAIL_FROM ||
-    (process.env.SMTP_USER ? `PizzaCraft <${process.env.SMTP_USER}>` : 'PizzaCraft <noreply@pizzacraft.com>');
+  const resend = getResendClient();
+  const fromAddress = process.env.EMAIL_FROM?.trim() || getSenderEmail();
 
   const subject = 'PizzaCraft Email Verification';
   const formattedName = name?.trim() || 'Foodie';
@@ -209,16 +169,22 @@ PizzaCraft Artisanal Stone-Fired Kitchen`;
 `;
 
   try {
-    const info = await transporter.sendMail({
+    const { data, error } = await resend.emails.send({
       from: fromAddress,
-      to,
+      to: [to],
       subject,
-      text: textBody,
       html: htmlBody,
+      text: textBody,
     });
 
-    console.log(`✅ [EmailService] Verification OTP successfully dispatched to <${to}> via SMTP. Message ID: ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
+    if (error) {
+      console.error(`❌ [EmailService] Resend API error dispatching verification email to <${to}>:`, error);
+      throw new Error(`Unable to send verification email: ${error.message || 'Resend error'}`);
+    }
+
+    const messageId = data?.id || '';
+    console.log(`✅ [EmailService] Verification OTP successfully dispatched to <${to}> via Resend API. Email ID: ${messageId}`);
+    return { success: true, messageId };
   } catch (err: any) {
     console.error(`❌ [EmailService] Failed to send verification email to <${to}>:`, err?.message || err);
     throw new Error('Unable to send verification email. Please try again.');
@@ -226,17 +192,15 @@ PizzaCraft Artisanal Stone-Fired Kitchen`;
 }
 
 /**
- * Sends a real PizzaCraft password reset email containing a 6-digit code or reset token.
+ * Sends a real PizzaCraft password reset email containing a 6-digit code or reset token using the Resend Email API.
  */
 export async function sendPasswordResetEmail(
   to: string,
   name: string,
   resetCodeOrToken: string
 ): Promise<{ success: boolean; messageId: string }> {
-  const transporter = createMailTransporter();
-  const fromAddress =
-    process.env.EMAIL_FROM ||
-    (process.env.SMTP_USER ? `PizzaCraft <${process.env.SMTP_USER}>` : 'PizzaCraft <noreply@pizzacraft.com>');
+  const resend = getResendClient();
+  const fromAddress = getSenderEmail();
 
   const subject = 'PizzaCraft Password Reset';
   const formattedName = name?.trim() || 'Foodie';
@@ -324,16 +288,22 @@ PizzaCraft Artisanal Stone-Fired Kitchen`;
 `;
 
   try {
-    const info = await transporter.sendMail({
+    const { data, error } = await resend.emails.send({
       from: fromAddress,
-      to,
+      to: [to],
       subject,
-      text: textBody,
       html: htmlBody,
+      text: textBody,
     });
 
-    console.log(`✅ [EmailService] Password reset code successfully sent to <${to}> via SMTP. Message ID: ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
+    if (error) {
+      console.error(`❌ [EmailService] Resend API error dispatching password reset email to <${to}>:`, error);
+      throw new Error(`Unable to send password reset email: ${error.message || 'Resend error'}`);
+    }
+
+    const messageId = data?.id || '';
+    console.log(`✅ [EmailService] Password reset code successfully sent to <${to}> via Resend API. Email ID: ${messageId}`);
+    return { success: true, messageId };
   } catch (err: any) {
     console.error(`❌ [EmailService] Failed to send password reset email to <${to}>:`, err?.message || err);
     throw new Error('Unable to send password reset email. Please try again.');
@@ -342,7 +312,7 @@ PizzaCraft Artisanal Stone-Fired Kitchen`;
 
 /**
  * General email notification dispatcher (used for order confirmation and inventory low-stock alerts).
- * Attempts real SMTP dispatch if configured.
+ * Delivers via Resend API when RESEND_API_KEY is configured.
  */
 export async function sendEmailNotification(
   payload: EmailPayload
@@ -363,27 +333,30 @@ export async function sendEmailNotification(
   db.emails.unshift(newEmail);
   DataStore.saveToDisk();
 
-  // If SMTP is configured, also deliver through SMTP
-  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+  // If RESEND_API_KEY is configured, also deliver through Resend API
+  if (process.env.RESEND_API_KEY?.trim()) {
     try {
-      const transporter = createMailTransporter();
-      const fromAddress =
-        process.env.EMAIL_FROM ||
-        `PizzaCraft <${process.env.SMTP_USER}>`;
+      const resend = getResendClient();
+      const fromAddress = getSenderEmail();
 
-      await transporter.sendMail({
+      const { data, error } = await resend.emails.send({
         from: fromAddress,
-        to: payload.to,
+        to: [payload.to],
         subject: payload.subject,
         text: payload.text || payload.content || '',
         html: payload.html,
       });
-      console.log(`✉️ [EmailService] Real SMTP delivered to <${payload.to}>: "${payload.subject}"`);
+
+      if (error) {
+        console.warn(`⚠️ [EmailService] Resend API returned error for notification to <${payload.to}>: ${error.message}`);
+      } else {
+        console.log(`✉️ [EmailService] Real notification email delivered to <${payload.to}> via Resend. Resend ID: ${data?.id}`);
+      }
     } catch (err: any) {
-      console.warn(`⚠️ [EmailService] Real SMTP delivery skipped for notification: ${err?.message || err}`);
+      console.warn(`⚠️ [EmailService] Resend delivery skipped for notification: ${err?.message || err}`);
     }
   } else {
-    console.log(`✉️ [EmailService] Recorded notification for <${payload.to}>: "${payload.subject}"`);
+    console.log(`✉️ [EmailService] Recorded notification for <${payload.to}>: "${payload.subject}" (RESEND_API_KEY not configured)`);
   }
 
   return { success: true, id: emailId };

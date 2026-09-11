@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { PresetPizza } from '../types';
 import { useCart } from '../context/CartContext';
-import { apiUrl } from '../config/api';
+import { apiUrl, apiFetch } from '../config/api';
 
 interface PizzaMenuProps {
   onCustomizePreset: (pizza: PresetPizza) => void;
@@ -33,6 +33,8 @@ export const PizzaMenu: React.FC<PizzaMenuProps> = ({
   const [addedNotice, setAddedNotice] = useState<string | null>(null);
   const [outOfStockItems, setOutOfStockItems] = useState<string[]>([]);
 
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
   useEffect(() => {
     fetchMenu();
   }, []);
@@ -40,26 +42,36 @@ export const PizzaMenu: React.FC<PizzaMenuProps> = ({
   const fetchMenu = async () => {
     try {
       setLoading(true);
-      const res = await fetch(apiUrl('/api/menu/pizzas'));
+      setFetchError(null);
+      const res = await apiFetch('/api/menu/pizzas');
       if (res.ok) {
         const data = await res.json();
-        setPizzas(data.presetPizzas || []);
+        setPizzas(data.presetPizzas || data.pizzas || []);
+      } else {
+        throw new Error(`Server returned HTTP ${res.status}`);
       }
       
       // Also fetch options to check any out of stock items
-      const optRes = await fetch(apiUrl('/api/menu/options'));
+      const optRes = await apiFetch('/api/menu/options');
       if (optRes.ok) {
         const optData = await optRes.json();
         const outOfStock: string[] = [];
-        [...optData.bases, ...optData.sauces, ...optData.cheeses, ...optData.vegetables].forEach((item: any) => {
-          if (item.stock <= 0) {
+        const allItems = [
+          ...(optData.bases || []),
+          ...(optData.sauces || []),
+          ...(optData.cheeses || []),
+          ...(optData.vegetables || optData.veggies || [])
+        ];
+        allItems.forEach((item: any) => {
+          if (item && item.stock <= 0) {
             outOfStock.push(item.id);
           }
         });
         setOutOfStockItems(outOfStock);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load menu pizzas:', err);
+      setFetchError(err?.message || 'Unable to connect to the menu server. Please retry.');
     } finally {
       setLoading(false);
     }
@@ -196,6 +208,18 @@ export const PizzaMenu: React.FC<PizzaMenuProps> = ({
           {[1, 2, 3, 4, 5, 6].map(n => (
             <div key={n} className="bg-amber-50/50 rounded-3xl p-4 animate-pulse space-y-3 h-96 border border-amber-100" />
           ))}
+        </div>
+      ) : fetchError && pizzas.length === 0 ? (
+        <div className="bg-amber-50/70 border border-amber-200 rounded-3xl p-8 text-center space-y-4 max-w-lg mx-auto">
+          <AlertCircle className="w-10 h-10 text-amber-600 mx-auto" />
+          <h3 className="text-lg font-bold text-slate-900 font-display">Unable to Load Menu</h3>
+          <p className="text-xs text-slate-600">{fetchError}</p>
+          <button
+            onClick={fetchMenu}
+            className="bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold px-4 py-2 rounded-xl text-xs transition shadow"
+          >
+            Retry Connection
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
