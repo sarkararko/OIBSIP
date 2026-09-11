@@ -68,14 +68,33 @@ async function startServer() {
 
       app.use(vite.middlewares);
     } else {
-      // 4. Serve production frontend
-      const distPath = path.join(projectRoot, "dist");
-      const express = (await import("express")).default;
-      app.use(express.static(distPath));
+      // 4. Serve production frontend if dist directory exists
+      const potentialDistPaths = [
+        path.join(projectRoot, "dist"),
+        path.join(process.cwd(), "WebDev-L3-PizzaDeliveryApp", "dist"),
+        path.join(process.cwd(), "dist"),
+      ];
+      const distPath = potentialDistPaths.find((p) => fs.existsSync(p));
 
-      app.get("*", (_req, res) => {
-        res.sendFile(path.join(distPath, "index.html"));
-      });
+      if (distPath && fs.existsSync(path.join(distPath, "index.html"))) {
+        const express = (await import("express")).default;
+        app.use(express.static(distPath));
+
+        app.get("*", (_req, res) => {
+          res.sendFile(path.join(distPath, "index.html"));
+        });
+      } else {
+        // Fallback for API-only backend deployment (e.g. Render)
+        app.get("/", (_req, res) => {
+          res.status(200).json({
+            service: "PizzaCraft Artisanal Backend Engine",
+            status: "running",
+            health: "/api/health",
+            menu: "/api/menu/pizzas",
+            docs: "https://github.com/arkaparno/pizzacraft",
+          });
+        });
+      }
     }
 
     // 5. Start HTTP server binding immediately to 0.0.0.0:PORT
